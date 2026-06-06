@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block title %}SOC Dashboard — Analyst Performance{% endblock %}
+{% block nav_analyst %}active{% endblock %}
+
+{% block content %}
+<div class="row g-3 mb-4">
+  <div class="col-12">
+    <div class="card bg-dark border-secondary text-light">
+      <div class="card-body">
+        <h6 class="card-title text-secondary text-uppercase">Analyst Performance (last 7 days)</h6>
+        <div class="table-responsive">
+          <table class="table table-dark table-hover align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Analyst</th><th>Date</th>
+                <th>Alerts Handled</th><th>Avg Response Time</th>
+              </tr>
+            </thead>
+            <tbody id="perf-rows">
+              <tr><td colspan="4" class="text-center text-secondary">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="small text-secondary mt-2">
+          <span class="badge text-bg-success">&lt; 5 min</span>
+          <span class="badge text-bg-warning">5–15 min</span>
+          <span class="badge text-bg-danger">&gt; 15 min</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card bg-dark border-secondary text-light">
+  <div class="card-body">
+    <h6 class="card-title text-secondary text-uppercase">MTTR Trend per Analyst (minutes)</h6>
+    <div class="chart-box" style="height:380px"><canvas id="mttrChart"></canvas></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const ANALYST_COLORS = {
+  alice:   "#3b82f6",
+  bob:     "#22c55e",
+  charlie: "#eab308",
+};
+
+function rowClass(seconds) {
+  const min = seconds / 60;
+  if (min < 5)  return "table-success";
+  if (min <= 15) return "table-warning";
+  return "table-danger";
+}
+
+function fmtTime(seconds) {
+  const m = Math.floor(seconds / 60);
+  const s = Math.round(seconds % 60);
+  return `${m}m ${s}s`;
+}
+
+// Build last-7-days date labels (YYYY-MM-DD), oldest -> newest.
+function last7Dates() {
+  const out = [];
+  const today = new Date();
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(today.getDate() - i);
+    out.push(d.toISOString().slice(0, 10));
+  }
+  return out;
+}
+
+let mttrChart;
+
+async function loadAnalystPerf() {
+  const stats = await (await fetch("/api/stats")).json();
+  const rows = stats.mttr_by_analyst || [];
+
+  // Table (sorted by date then analyst).
+  const tbody = document.getElementById("perf-rows");
+  if (!rows.length) {
+    tbody.innerHTML =
+      `<tr><td colspan="4" class="text-center text-secondary">No actions recorded yet.</td></tr>`;
+  } else {
+    tbody.innerHTML = rows
+      .slice()
+      .sort((a, b) => (a.date + a.analyst).localeCompare(b.date + b.analyst))
+      .map(r => `
+        <tr class="${rowClass(r.avg_seconds)}">
+          <td class="text-capitalize">${r.analyst}</td>
+          <td>${r.date}</td>
+          <td>${r.count}</td>
+          <td>${fmtTime(r.avg_seconds)}</td>
+        </tr>`)
+      .join("");
+  }
+
+  // Chart: one line/bar dataset per analyst across the last 7 days.
+  const labels = last7Dates();
+  const analysts = [...new Set(rows.map(r => r.analyst))].sort();
+  const datasets = analysts.map(name => {
+    const byDate = {};
+    rows.filter(r => r.analyst === name)
+        .forEach(r => { byDate[r.date] = +(r.avg_seconds / 60).toFixed(1); });
+    return {
+      label: name,
+      data: labels.map(d => byDate[d] ?? null),
+      backgroundColor: ANALYST_COLORS[name] || "#8b5cf6",
+      borderColor: ANALYST_COLORS[name] || "#8b5cf6",
+      borderWidth: 1,
+    };
+  });
+
+  const ctx = document.getElementById("mttrChart");
+  if (mttrChart) mttrChart.destroy();
+  mttrChart = new Chart(ctx, {
+    type: "bar",
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        y: { title: { display: true, text: "Avg MTTR (min)" }, beginAtZero: true },
+      },
+      plugins: { legend: { position: "top" } },
+    },
+  });
+}
+
+loadAnalystPerf();
+</script>
+{% endblock %}

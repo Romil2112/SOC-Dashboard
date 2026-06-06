@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}SOC Dashboard — Alert Queue{% endblock %}
+{% block nav_dashboard %}active{% endblock %}
+
+{% block content %}
+<!-- Row 1: stat cards -->
+<div class="row g-3 mb-4">
+  <div class="col-md-3">
+    <div class="card stat-card bg-dark border-secondary text-light h-100">
+      <div class="card-body">
+        <div class="text-secondary small text-uppercase">Total Alerts</div>
+        <div class="display-6" id="stat-total">—</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card stat-card bg-dark border-secondary text-light h-100">
+      <div class="card-body">
+        <div class="text-secondary small text-uppercase">Open</div>
+        <div class="display-6 text-warning" id="stat-open">—</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card stat-card bg-dark border-secondary text-light h-100">
+      <div class="card-body">
+        <div class="text-secondary small text-uppercase">Closed Today</div>
+        <div class="display-6 text-info" id="stat-closed-today">—</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card stat-card bg-dark border-secondary text-light h-100">
+      <div class="card-body">
+        <div class="text-secondary small text-uppercase">Avg MTTR Today (min)</div>
+        <div class="display-6 text-success" id="stat-mttr-today">—</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Row 2: charts -->
+<div class="row g-3 mb-4">
+  <div class="col-md-6">
+    <div class="card bg-dark border-secondary text-light h-100">
+      <div class="card-body">
+        <h6 class="card-title text-secondary text-uppercase">Alerts by Category</h6>
+        <div class="chart-box"><canvas id="categoryChart"></canvas></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="card bg-dark border-secondary text-light h-100">
+      <div class="card-body">
+        <h6 class="card-title text-secondary text-uppercase">Alerts by Severity</h6>
+        <div class="chart-box"><canvas id="severityChart"></canvas></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Row 3: alert queue -->
+<div class="card bg-dark border-secondary text-light">
+  <div class="card-body">
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+      <h6 class="card-title text-secondary text-uppercase mb-0">Open Alert Queue</h6>
+      <div class="d-flex align-items-center gap-2">
+        <label class="small text-secondary mb-0" for="analyst-name">Analyst:</label>
+        <input type="text" id="analyst-name" class="form-control form-control-sm"
+               style="width:180px" placeholder="your name">
+        <span class="badge text-bg-secondary" id="refresh-status">idle</span>
+      </div>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-dark table-hover align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Severity</th><th>Title</th><th>Category</th>
+            <th>Source IP</th><th>Age</th><th class="text-end">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="alert-rows">
+          <tr><td colspan="6" class="text-center text-secondary">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='dashboard.js') }}"></script>
+{% endblock %}
