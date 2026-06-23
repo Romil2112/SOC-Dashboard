@@ -1,5 +1,6 @@
 """SOC Analyst Dashboard — Flask + psycopg2 (no ORM)."""
 import os
+from datetime import datetime, timezone
 
 import psycopg2
 import psycopg2.extras
@@ -23,6 +24,42 @@ ACTION_TO_STATUS = {
     "classify_fp": "false_positive",
     "escalate": "escalated",
 }
+
+# Per-severity response-time SLA targets (seconds). An alert breaches SLA when
+# its time-to-triage (or current age, if still open) exceeds the target.
+SLA_SECONDS = {
+    "CRITICAL": 15 * 60,       # 15 minutes
+    "HIGH":     60 * 60,       # 1 hour
+    "MEDIUM":   4 * 60 * 60,   # 4 hours
+    "LOW":      24 * 60 * 60,  # 24 hours
+}
+
+
+def compute_sla(rows):
+    """Given rows of {severity, resp, created_at}, return SLA breach metrics.
+
+    resp = recorded triage response time (seconds) or None if still open
+    (in which case the alert's current age is used).
+    """
+    now_ts = datetime.now(timezone.utc)
+    considered = breaches = 0
+    by_severity = {}
+    for r in rows:
+        target = SLA_SECONDS.get(r["severity"])
+        if target is None:
+            continue
+        considered += 1
+        elapsed = r["resp"] if r["resp"] is not None else (now_ts - r["created_at"]).total_seconds()
+        if elapsed > target:
+            breaches += 1
+            by_severity[r["severity"]] = by_severity.get(r["severity"], 0) + 1
+    rate = round(100 * breaches / considered, 1) if considered else 0.0
+    return {
+        "breaches": breaches,
+        "considered": considered,
+        "breach_rate": rate,
+        "by_severity": by_severity,
+    }
 
 
 def get_conn():
@@ -187,6 +224,21 @@ def api_stats():
         )
         mttr_by_analyst = [serialize(r) for r in cur.fetchall()]
 
+        # SLA inputs: each alert's severity, age, and (earliest) triage response time.
+        cur.execute(
+            """
+            SELECT a.severity,
+                   a.created_at,
+                   (SELECT min(aa.response_time_seconds)
+                      FROM analyst_actions aa
+                     WHERE aa.alert_id = a.id) AS resp
+            FROM alerts a
+            """
+        )
+        sla_rows = cur.fetchall()
+
+    sla = compute_sla(sla_rows)
+
     return jsonify(
         {
             "total": total,
@@ -195,6 +247,7 @@ def api_stats():
             "by_category": by_category,
             "by_severity": by_severity,
             "mttr_by_analyst": mttr_by_analyst,
+            "sla": sla,
         }
     )
 

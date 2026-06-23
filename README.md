@@ -2,6 +2,7 @@
 
 Flask-based Security Operations Center analyst dashboard with real-time alert queue, MTTR tracking, and Chart.js visualizations.
 
+![CI](https://github.com/Romil2112/SOC-Dashboard/actions/workflows/ci.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![Flask](https://img.shields.io/badge/Flask-3.x-000000?logo=flask&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
@@ -38,6 +39,7 @@ as a clear, hands-on teaching tool for the alert-triage workflow.
 - **One-click triage:** True Positive / False Positive / Escalate buttons per alert
 - **Analyst name saved to `localStorage`** — no login required for the demo
 - **MTTR tracking** per analyst per day, with a 7-day trend chart
+- **SLA breach tracking:** per-severity response targets (CRITICAL 15m → LOW 24h) with a live breach-rate KPI
 - **Color-coded performance table:** green &lt; 5 min, yellow 5–15 min, red &gt; 15 min
 - **Alerts by category** doughnut chart (brute force, malware, phishing, port scan, anomaly)
 - **Alerts by severity** bar chart (CRITICAL / HIGH / MEDIUM / LOW)
@@ -72,7 +74,8 @@ as a clear, hands-on teaching tool for the alert-triage workflow.
 | PostgreSQL | Schema design, JSONB-ready tables, timestamp-based MTTR aggregation |
 | JavaScript | Fetch API polling, localStorage, dynamic DOM updates, Chart.js integration |
 | Bootstrap 5 | Responsive dark-themed UI, badge system, card layout |
-| SOC Domain Knowledge | Alert triage workflow, MTTR KPI, severity classification, analyst performance tracking |
+| SOC Domain Knowledge | Alert triage workflow, MTTR + SLA-breach KPIs, severity classification, analyst performance tracking |
+| Testing / CI | pytest integration suite (Flask test client + PostgreSQL) run via GitHub Actions with a Postgres service container |
 | Docker | Multi-service Compose with health-checked PostgreSQL and volume mounts |
 | Agentic AI Development | Built end-to-end using Claude Code with structured prompt engineering |
 

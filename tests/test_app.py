@@ -1,0 +1,75 @@
+"""Integration tests for the SOC dashboard API (Flask test client + Postgres)."""
+import json
+
+
+def test_pages_render(client):
+    assert client.get("/").status_code == 200
+    assert client.get("/analyst").status_code == 200
+
+
+def test_open_alerts_only_and_severity_sorted(client):
+    rows = client.get("/api/alerts").get_json()
+    assert [r["id"] for r in rows] == [4, 3]          # HIGH before LOW; only open
+    assert all(r["status"] == "open" for r in rows)
+
+
+def test_all_alerts_returns_everything(client):
+    rows = client.get("/api/alerts/all").get_json()
+    assert len(rows) == 4
+
+
+def test_stats_counts(client):
+    s = client.get("/api/stats").get_json()
+    assert s["total"] == 4
+    assert s["open"] == 2
+    assert s["closed"] == 2
+    assert s["by_severity"]["CRITICAL"] == 2
+
+
+def test_stats_sla_breach_metrics(client):
+    sla = client.get("/api/stats").get_json()["sla"]
+    assert sla["considered"] == 4
+    assert sla["breaches"] == 2          # crit-slow + low-overdue
+    assert sla["breach_rate"] == 50.0
+    assert sla["by_severity"].get("CRITICAL") == 1
+    assert sla["by_severity"].get("LOW") == 1
+
+
+def test_classify_updates_status_and_closes_alert(client):
+    resp = client.post(
+        "/api/alerts/4/classify",
+        data=json.dumps({"analyst": "carol", "action": "classify_tp"}),
+        content_type="application/json",
+    )
+    assert resp.status_code == 200
+    assert resp.get_json()["status"] == "true_positive"
+    # alert 4 should no longer appear in the open queue
+    open_ids = [r["id"] for r in client.get("/api/alerts").get_json()]
+    assert 4 not in open_ids
+
+
+def test_classify_requires_analyst(client):
+    resp = client.post(
+        "/api/alerts/4/classify",
+        data=json.dumps({"action": "classify_tp"}),
+        content_type="application/json",
+    )
+    assert resp.status_code == 400
+
+
+def test_classify_rejects_unknown_action(client):
+    resp = client.post(
+        "/api/alerts/4/classify",
+        data=json.dumps({"analyst": "carol", "action": "nope"}),
+        content_type="application/json",
+    )
+    assert resp.status_code == 400
+
+
+def test_classify_unknown_alert_404(client):
+    resp = client.post(
+        "/api/alerts/9999/classify",
+        data=json.dumps({"analyst": "carol", "action": "classify_tp"}),
+        content_type="application/json",
+    )
+    assert resp.status_code == 404

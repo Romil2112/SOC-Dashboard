@@ -4,8 +4,8 @@
 
 {% block content %}
 <!-- Row 1: stat cards -->
-<div class="row g-3 mb-4">
-  <div class="col-md-3">
+<div class="row row-cols-2 row-cols-md-5 g-3 mb-4">
+  <div class="col">
     <div class="card stat-card bg-dark border-secondary text-light h-100">
       <div class="card-body">
         <div class="text-secondary small text-uppercase">Total Alerts</div>
@@ -13,7 +13,7 @@
       </div>
     </div>
   </div>
-  <div class="col-md-3">
+  <div class="col">
     <div class="card stat-card bg-dark border-secondary text-light h-100">
       <div class="card-body">
         <div class="text-secondary small text-uppercase">Open</div>
@@ -21,7 +21,7 @@
       </div>
     </div>
   </div>
-  <div class="col-md-3">
+  <div class="col">
     <div class="card stat-card bg-dark border-secondary text-light h-100">
       <div class="card-body">
         <div class="text-secondary small text-uppercase">Closed Today</div>
@@ -29,11 +29,19 @@
       </div>
     </div>
   </div>
-  <div class="col-md-3">
+  <div class="col">
     <div class="card stat-card bg-dark border-secondary text-light h-100">
       <div class="card-body">
         <div class="text-secondary small text-uppercase">Avg MTTR Today (min)</div>
         <div class="display-6 text-success" id="stat-mttr-today">—</div>
+      </div>
+    </div>
+  </div>
+  <div class="col">
+    <div class="card stat-card bg-dark border-secondary text-light h-100">
+      <div class="card-body">
+        <div class="text-secondary small text-uppercase">SLA Breach Rate</div>
+        <div class="display-6 text-danger" id="stat-sla-breach">—</div>
       </div>
     </div>
   </div>
