@@ -125,6 +125,7 @@ async function loadStats() {
 
   setText("stat-closed-today", closedToday);
   setText("stat-mttr-today", mttrMin);
+  setText("stat-sla-breach", stats.sla ? `${stats.sla.breach_rate}%` : "—");
 
   updateCharts(stats);
   return stats;
