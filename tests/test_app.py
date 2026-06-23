@@ -73,3 +73,39 @@ def test_classify_unknown_alert_404(client):
         content_type="application/json",
     )
     assert resp.status_code == 404
+
+
+def test_ingest_alert_creates_open_alert(client):
+    payload = {
+        "title": "Brute-force attack from 10.1.2.3",
+        "category": "brute_force",
+        "severity": "HIGH",
+        "source_ip": "10.1.2.3",
+        "description": "120 failed logins; MITRE T1110.001.",
+    }
+    resp = client.post("/api/alerts", data=json.dumps(payload), content_type="application/json")
+    assert resp.status_code == 201
+    created = resp.get_json()
+    assert created["status"] == "open"
+    assert created["source_ip"] == "10.1.2.3"
+    # the ingested alert is now in the open queue
+    open_titles = [r["title"] for r in client.get("/api/alerts").get_json()]
+    assert payload["title"] in open_titles
+
+
+def test_ingest_requires_title_and_category(client):
+    resp = client.post(
+        "/api/alerts",
+        data=json.dumps({"severity": "HIGH"}),
+        content_type="application/json",
+    )
+    assert resp.status_code == 400
+
+
+def test_ingest_rejects_invalid_severity(client):
+    resp = client.post(
+        "/api/alerts",
+        data=json.dumps({"title": "x", "category": "malware", "severity": "BOGUS"}),
+        content_type="application/json",
+    )
+    assert resp.status_code == 400
