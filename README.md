@@ -89,6 +89,15 @@ tracked as MTTR. Together they demonstrate the full SOC pipeline:
 
 **Ingest → Detect → Triage → Respond.**
 
+The two are **wired together for real**, not just conceptually: log-analyzer's
+`--push-soc <url>` flag POSTs each detected incident to this dashboard's
+`POST /api/alerts` endpoint, where it lands in the open queue for triage.
+
+```bash
+# detect on a web access log and push findings straight into the SOC queue
+python log_analyzer.py access.log --no-db --push-soc http://localhost:8000/api/alerts
+```
+
 ## Quick Start
 
 ### Prerequisites
@@ -126,9 +135,10 @@ docker compose up
 | GET | `/` | Main dashboard |
 | GET | `/analyst` | Analyst performance page |
 | GET | `/api/alerts` | Open alerts sorted by severity |
-| GET | `/api/alerts/all` | All 50 alerts |
+| GET | `/api/alerts/all` | All alerts |
+| POST | `/api/alerts` | **Ingest** a new alert `{title, category, severity, source_ip?, description?}` → 201 |
 | POST | `/api/alerts/<id>/classify` | Classify alert `{analyst, action}` |
-| GET | `/api/stats` | Summary stats + MTTR by analyst |
+| GET | `/api/stats` | Summary stats + MTTR by analyst + SLA-breach metrics |
 
 `action` is one of `classify_tp` (→ `true_positive`), `classify_fp` (→ `false_positive`),
 or `escalate` (→ `escalated`).

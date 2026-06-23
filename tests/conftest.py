@@ -39,6 +39,8 @@ INSERT INTO alerts (id, title, category, severity, status, created_at) VALUES
 INSERT INTO analyst_actions (alert_id, analyst_name, action, response_time_seconds) VALUES
     (1, 'alice', 'classify_tp', 100),
     (2, 'bob',   'classify_tp', 2000);
+-- advance the SERIAL sequence past the explicit ids so fresh inserts don't collide
+SELECT setval(pg_get_serial_sequence('alerts', 'id'), (SELECT max(id) FROM alerts));
 """
 
 

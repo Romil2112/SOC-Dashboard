@@ -139,6 +139,38 @@ def api_all_alerts():
     return jsonify([serialize(r) for r in rows])
 
 
+@app.route("/api/alerts", methods=["POST"])
+def api_ingest_alert():
+    """Ingest a new alert into the open queue.
+
+    This is the entry point that lets an upstream detector (e.g. log-analyzer)
+    push real incidents into the dashboard instead of relying on seed data.
+    """
+    body = request.get_json(silent=True) or {}
+    title    = (body.get("title") or "").strip()
+    category = (body.get("category") or "").strip()
+    severity = (body.get("severity") or "").strip().upper()
+
+    if not title or not category:
+        abort(400, description="title and category are required")
+    if severity not in SEVERITY_RANK:
+        abort(400, description="severity must be CRITICAL, HIGH, MEDIUM or LOW")
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO alerts (title, category, severity, source_ip, description, status)
+            VALUES (%s, %s, %s, %s, %s, 'open')
+            RETURNING *
+            """,
+            (title, category, severity,
+             body.get("source_ip") or None, body.get("description") or None),
+        )
+        created = cur.fetchone()
+
+    return jsonify(serialize(created)), 201
+
+
 @app.route("/api/alerts/<int:alert_id>/classify", methods=["POST"])
 def api_classify(alert_id):
     """Classify an alert: update status, record the analyst action + MTTR."""
