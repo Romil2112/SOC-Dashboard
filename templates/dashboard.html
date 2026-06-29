@@ -4,7 +4,7 @@
 
 {% block content %}
 <!-- Row 1: stat cards -->
-<div class="row row-cols-2 row-cols-md-5 g-3 mb-4">
+<div class="row row-cols-2 row-cols-md-3 row-cols-xl-6 g-3 mb-4">
   <div class="col">
     <div class="card stat-card bg-dark border-secondary text-light h-100">
       <div class="card-body">
@@ -45,11 +45,50 @@
       </div>
     </div>
   </div>
+  <div class="col">
+    <div class="card stat-card bg-dark border-secondary text-light h-100">
+      <div class="card-body">
+        <div class="text-secondary small text-uppercase">Escalation Rate</div>
+        <div class="display-6 text-primary" id="stat-escalation">—</div>
+      </div>
+    </div>
+  </div>
 </div>
 
-<!-- Row 2: charts -->
+<!-- Filter bar: drives the charts and the alert queue below -->
+<div class="card bg-dark border-secondary text-light mb-4">
+  <div class="card-body py-2">
+    <div class="row g-2 align-items-end">
+      <div class="col-6 col-md-3">
+        <label class="form-label small text-secondary mb-1" for="filter-severity">Severity</label>
+        <select id="filter-severity" class="form-select form-select-sm bg-dark text-light border-secondary">
+          <option value="">All severities</option>
+          <option>CRITICAL</option><option>HIGH</option>
+          <option>MEDIUM</option><option>LOW</option>
+        </select>
+      </div>
+      <div class="col-6 col-md-3">
+        <label class="form-label small text-secondary mb-1" for="filter-source">Source</label>
+        <select id="filter-source" class="form-select form-select-sm bg-dark text-light border-secondary">
+          <option value="">All sources</option>
+        </select>
+      </div>
+      <div class="col-6 col-md-3">
+        <label class="form-label small text-secondary mb-1" for="filter-assignee">Assignee</label>
+        <select id="filter-assignee" class="form-select form-select-sm bg-dark text-light border-secondary">
+          <option value="">All assignees</option>
+        </select>
+      </div>
+      <div class="col-6 col-md-3 d-flex gap-2">
+        <button id="filter-clear" class="btn btn-sm btn-outline-secondary w-100">Clear filters</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Row 2: charts (respond live to the filters above) -->
 <div class="row g-3 mb-4">
-  <div class="col-md-6">
+  <div class="col-md-4">
     <div class="card bg-dark border-secondary text-light h-100">
       <div class="card-body">
         <h6 class="card-title text-secondary text-uppercase">Alerts by Category</h6>
@@ -57,11 +96,19 @@
       </div>
     </div>
   </div>
-  <div class="col-md-6">
+  <div class="col-md-4">
     <div class="card bg-dark border-secondary text-light h-100">
       <div class="card-body">
         <h6 class="card-title text-secondary text-uppercase">Alerts by Severity</h6>
         <div class="chart-box"><canvas id="severityChart"></canvas></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card bg-dark border-secondary text-light h-100">
+      <div class="card-body">
+        <h6 class="card-title text-secondary text-uppercase">Alerts by Source</h6>
+        <div class="chart-box"><canvas id="sourceChart"></canvas></div>
       </div>
     </div>
   </div>
@@ -83,12 +130,12 @@
       <table class="table table-dark table-hover align-middle mb-0">
         <thead>
           <tr>
-            <th>Severity</th><th>Title</th><th>Category</th>
+            <th>Severity</th><th>Title</th><th>Category</th><th>Source</th>
             <th>Source IP</th><th>Age</th><th class="text-end">Actions</th>
           </tr>
         </thead>
         <tbody id="alert-rows">
-          <tr><td colspan="6" class="text-center text-secondary">Loading…</td></tr>
+          <tr><td colspan="7" class="text-center text-secondary">Loading…</td></tr>
         </tbody>
       </table>
     </div>

@@ -35,6 +35,41 @@ def test_stats_sla_breach_metrics(client):
     assert sla["by_severity"].get("LOW") == 1
 
 
+def test_stats_escalation_metrics(client):
+    esc = client.get("/api/stats").get_json()["escalation"]
+    assert esc["triaged"] == 2           # alerts 1 (TP) and 2 (escalated)
+    assert esc["escalated"] == 1         # alert 2
+    assert esc["rate"] == 50.0
+
+
+def test_stats_by_source_and_assignees(client):
+    s = client.get("/api/stats").get_json()
+    assert s["by_source"]["EDR"] == 1
+    assert s["by_source"]["Auth Logs"] == 1
+    assert s["assignees"] == ["alice", "bob"]
+
+
+def test_filter_alerts_by_severity(client):
+    rows = client.get("/api/alerts/all?severity=CRITICAL").get_json()
+    assert sorted(r["id"] for r in rows) == [1, 2]
+
+
+def test_filter_alerts_by_source(client):
+    rows = client.get("/api/alerts/all?source=EDR").get_json()
+    assert [r["id"] for r in rows] == [2]
+
+
+def test_filter_alerts_by_assignee(client):
+    rows = client.get("/api/alerts/all?assigned_to=bob").get_json()
+    assert [r["id"] for r in rows] == [2]
+
+
+def test_filter_combines_with_open_queue(client):
+    # The open queue honors filters too: only open + HIGH -> alert 4.
+    rows = client.get("/api/alerts?severity=HIGH").get_json()
+    assert [r["id"] for r in rows] == [4]
+
+
 def test_classify_updates_status_and_closes_alert(client):
     resp = client.post(
         "/api/alerts/4/classify",
@@ -80,6 +115,7 @@ def test_ingest_alert_creates_open_alert(client):
         "title": "Brute-force attack from 10.1.2.3",
         "category": "brute_force",
         "severity": "HIGH",
+        "source": "Auth Logs",
         "source_ip": "10.1.2.3",
         "description": "120 failed logins; MITRE T1110.001.",
     }
@@ -87,6 +123,7 @@ def test_ingest_alert_creates_open_alert(client):
     assert resp.status_code == 201
     created = resp.get_json()
     assert created["status"] == "open"
+    assert created["source"] == "Auth Logs"
     assert created["source_ip"] == "10.1.2.3"
     # the ingested alert is now in the open queue
     open_titles = [r["title"] for r in client.get("/api/alerts").get_json()]

@@ -29,6 +29,15 @@ ACTION_TO_STATUS = {
     "escalate": "escalated",
 }
 
+# Detecting sensor/tool per category — the "source" dimension analysts filter on.
+SOURCES = {
+    "brute_force": "Auth Logs",
+    "malware":     "EDR",
+    "phishing":    "Email Gateway",
+    "port_scan":   "Firewall/IDS",
+    "anomaly":     "SIEM/UEBA",
+}
+
 # Realistic title/description templates keyed by category.
 TEMPLATES = {
     "brute_force": [
@@ -151,6 +160,7 @@ def build_alerts():
                 "title": title_tpl.format(**fields),
                 "category": category,
                 "severity": severity,
+                "source": SOURCES[category],
                 "source_ip": source_ip,
                 "description": desc_tpl.format(**fields),
                 "created_at": created_at,
@@ -184,14 +194,15 @@ def main():
                 cur.execute(
                     """
                     INSERT INTO alerts
-                        (title, category, severity, source_ip, description,
+                        (title, category, severity, source, source_ip, description,
                          created_at, status, assigned_to)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     RETURNING id
                     """,
                     (
-                        a["title"], a["category"], a["severity"], a["source_ip"],
-                        a["description"], a["created_at"], status, analyst,
+                        a["title"], a["category"], a["severity"], a["source"],
+                        a["source_ip"], a["description"], a["created_at"],
+                        status, analyst,
                     ),
                 )
                 alert_id = cur.fetchone()[0]

@@ -1,6 +1,6 @@
 # SOC Dashboard
 
-Flask-based Security Operations Center analyst dashboard with real-time alert queue, MTTR tracking, and Chart.js visualizations.
+Flask-based Security Operations Center analyst dashboard with a real-time alert queue, SOC KPIs (MTTR, SLA-breach rate, escalation rate), interactive filters, and Chart.js visualizations.
 
 ![CI](https://github.com/Romil2112/SOC-Dashboard/actions/workflows/ci.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
@@ -40,11 +40,15 @@ as a clear, hands-on teaching tool for the alert-triage workflow.
 - **Analyst name saved to `localStorage`** — no login required for the demo
 - **MTTR tracking** per analyst per day, with a 7-day trend chart
 - **SLA breach tracking:** per-severity response targets (CRITICAL 15m → LOW 24h) with a live breach-rate KPI
+- **Escalation-rate KPI:** share of triaged alerts escalated to incident response (`escalated / triaged`)
+- **Interactive filters:** filter the queue *and* the charts live by **severity**, **detection source**, and **assignee** (server-side, injection-safe query params)
+- **Detection-source dimension:** every alert carries the sensor that raised it (EDR, Firewall/IDS, Email Gateway, Auth Logs, SIEM/UEBA)
 - **Color-coded performance table:** green &lt; 5 min, yellow 5–15 min, red &gt; 15 min
 - **Alerts by category** doughnut chart (brute force, malware, phishing, port scan, anomaly)
 - **Alerts by severity** bar chart (CRITICAL / HIGH / MEDIUM / LOW)
+- **Alerts by source** horizontal bar chart across detection sensors
 - **Auto-refresh every 30 seconds** via JavaScript polling
-- **50 pre-seeded realistic alerts** across 5 categories and 4 severity levels
+- **50 pre-seeded realistic alerts** across 5 categories, 4 severity levels, and 5 detection sources
 - **Docker support:** `docker compose up` starts Flask + PostgreSQL together
 - **MIT Licensed**
 
@@ -74,7 +78,8 @@ as a clear, hands-on teaching tool for the alert-triage workflow.
 | PostgreSQL | Schema design, JSONB-ready tables, timestamp-based MTTR aggregation |
 | JavaScript | Fetch API polling, localStorage, dynamic DOM updates, Chart.js integration |
 | Bootstrap 5 | Responsive dark-themed UI, badge system, card layout |
-| SOC Domain Knowledge | Alert triage workflow, MTTR + SLA-breach KPIs, severity classification, analyst performance tracking |
+| SOC Domain Knowledge | Alert triage workflow, MTTR + SLA-breach + escalation-rate KPIs, severity classification, detection-source attribution, analyst performance tracking |
+| Data Filtering | Server-side, injection-safe filtering (whitelisted columns) driving both the queue and the charts |
 | Testing / CI | pytest integration suite (Flask test client + PostgreSQL) run via GitHub Actions with a Postgres service container |
 | Docker | Multi-service Compose with health-checked PostgreSQL and volume mounts |
 | Agentic AI Development | Built end-to-end using Claude Code with structured prompt engineering |
@@ -134,14 +139,15 @@ docker compose up
 |--------|----------|-------------|
 | GET | `/` | Main dashboard |
 | GET | `/analyst` | Analyst performance page |
-| GET | `/api/alerts` | Open alerts sorted by severity |
-| GET | `/api/alerts/all` | All alerts |
-| POST | `/api/alerts` | **Ingest** a new alert `{title, category, severity, source_ip?, description?}` → 201 |
+| GET | `/api/alerts` | Open alerts sorted by severity. Filterable: `?severity=&source=&assigned_to=` |
+| GET | `/api/alerts/all` | All alerts. Same filter query params as above |
+| POST | `/api/alerts` | **Ingest** a new alert `{title, category, severity, source?, source_ip?, description?}` → 201 |
 | POST | `/api/alerts/<id>/classify` | Classify alert `{analyst, action}` |
-| GET | `/api/stats` | Summary stats + MTTR by analyst + SLA-breach metrics |
+| GET | `/api/stats` | Summary counts + `by_category` / `by_severity` / `by_source` + `escalation` + `sla` + MTTR by analyst + `assignees` |
 
 `action` is one of `classify_tp` (→ `true_positive`), `classify_fp` (→ `false_positive`),
-or `escalate` (→ `escalated`).
+or `escalate` (→ `escalated`). Filter query params are validated against a column
+whitelist, so they compose into parameterized SQL safely (no injection surface).
 
 ## Project Structure
 
@@ -158,7 +164,7 @@ soc-dashboard/
 ├── LICENSE                # MIT license
 ├── templates/             # Jinja2 templates
 │   ├── base.html          #   Shared layout: dark navbar, Bootstrap + Chart.js CDNs
-│   ├── dashboard.html     #   Stat cards, category/severity charts, alert queue table
+│   ├── dashboard.html     #   KPI cards, filter bar, category/severity/source charts, queue
 │   └── analyst.html       #   MTTR performance table + 7-day trend chart
 ├── static/
 │   └── dashboard.js       # Fetch polling, localStorage, Chart.js render/update
