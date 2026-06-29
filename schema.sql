@@ -12,12 +12,14 @@ CREATE TABLE alerts (
     id          SERIAL PRIMARY KEY,
     title       TEXT        NOT NULL,
     category    TEXT        NOT NULL,
-    severity    TEXT        NOT NULL,
+    severity    TEXT        NOT NULL
+                CHECK (severity IN ('CRITICAL', 'HIGH', 'MEDIUM', 'LOW')),
     source      TEXT,
     source_ip   TEXT,
     description TEXT,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    status      TEXT        NOT NULL DEFAULT 'open',
+    status      TEXT        NOT NULL DEFAULT 'open'
+                CHECK (status IN ('open', 'true_positive', 'false_positive', 'escalated')),
     assigned_to TEXT
 );
 
