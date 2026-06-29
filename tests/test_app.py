@@ -1,5 +1,8 @@
 """Integration tests for the SOC dashboard API (Flask test client + Postgres)."""
 import json
+from datetime import datetime, timedelta, timezone
+
+from app import compute_sla
 
 
 def test_pages_render(client):
@@ -99,6 +102,34 @@ def test_classify_rejects_unknown_action(client):
         content_type="application/json",
     )
     assert resp.status_code == 400
+
+
+def test_classify_already_closed_returns_409(client):
+    # alert 1 is already true_positive in the fixtures; reclassifying is rejected.
+    resp = client.post(
+        "/api/alerts/1/classify",
+        data=json.dumps({"analyst": "carol", "action": "classify_tp"}),
+        content_type="application/json",
+    )
+    assert resp.status_code == 409
+
+
+def test_compute_sla_counts_medium_severity_breach():
+    # MEDIUM target is 4h; a still-open alert aged 5h breaches SLA.
+    old = datetime.now(timezone.utc) - timedelta(hours=5)
+    sla = compute_sla([{"severity": "MEDIUM", "resp": None, "created_at": old}])
+    assert sla["considered"] == 1
+    assert sla["breaches"] == 1
+    assert sla["by_severity"]["MEDIUM"] == 1
+
+
+def test_compute_sla_skips_unknown_severity():
+    # An unrecognized severity is silently excluded from SLA accounting.
+    now = datetime.now(timezone.utc)
+    sla = compute_sla([{"severity": "BOGUS", "resp": 10, "created_at": now}])
+    assert sla["considered"] == 0
+    assert sla["breaches"] == 0
+    assert sla["breach_rate"] == 0.0
 
 
 def test_classify_unknown_alert_404(client):

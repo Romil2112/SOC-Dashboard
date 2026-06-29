@@ -209,6 +209,8 @@ def api_classify(alert_id):
         alert = cur.fetchone()
         if alert is None:
             abort(404, description="alert not found")
+        if alert["status"] != "open":
+            abort(409, description="alert is already closed")
 
         # Update the alert's status and assignee.
         cur.execute(
