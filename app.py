@@ -80,6 +80,42 @@ def serialize(row):
     return out
 
 
+# Columns the alert-list endpoints can be filtered on, mapped to their request
+# query-parameter names. Only these are honored, so the filter is injection-safe.
+FILTER_COLUMNS = {"severity": "severity", "source": "source", "assigned_to": "assigned_to"}
+
+
+def alert_filters(extra=None):
+    """Build a parameterized WHERE clause from the request's query string.
+
+    Returns (sql, params). `extra` is a list of pre-baked ("col = %s", value)
+    predicates (e.g. the open-queue's status filter) merged with user filters.
+    """
+    clauses, params = list(extra or []), []
+    where_sql = [c for c, _ in clauses] if clauses else []
+    params = [v for _, v in clauses] if clauses else []
+    for param, column in FILTER_COLUMNS.items():
+        value = (request.args.get(param) or "").strip()
+        if value:
+            where_sql.append(f"{column} = %s")
+            params.append(value)
+    sql = (" WHERE " + " AND ".join(where_sql)) if where_sql else ""
+    return sql, params
+
+
+# Shared severity ordering used by every alert query (CRITICAL first, then age).
+_SEVERITY_ORDER = """
+    ORDER BY CASE severity
+                 WHEN 'CRITICAL' THEN 1
+                 WHEN 'HIGH'     THEN 2
+                 WHEN 'MEDIUM'   THEN 3
+                 WHEN 'LOW'      THEN 4
+                 ELSE 5
+             END,
+             created_at DESC
+"""
+
+
 # --------------------------------------------------------------------------- #
 # Pages
 # --------------------------------------------------------------------------- #
@@ -98,43 +134,26 @@ def analyst():
 # --------------------------------------------------------------------------- #
 @app.route("/api/alerts")
 def api_open_alerts():
-    """Open alerts only, sorted CRITICAL -> LOW then newest first."""
+    """Open queue, optionally filtered by severity/source/assignee.
+
+    CRITICAL -> LOW then newest first.
+    """
+    where_sql, params = alert_filters(extra=[("status = %s", "open")])
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT * FROM alerts
-            WHERE status = 'open'
-            ORDER BY CASE severity
-                         WHEN 'CRITICAL' THEN 1
-                         WHEN 'HIGH'     THEN 2
-                         WHEN 'MEDIUM'   THEN 3
-                         WHEN 'LOW'      THEN 4
-                         ELSE 5
-                     END,
-                     created_at DESC
-            """
-        )
+        cur.execute("SELECT * FROM alerts" + where_sql + _SEVERITY_ORDER, params)
         rows = cur.fetchall()
     return jsonify([serialize(r) for r in rows])
 
 
 @app.route("/api/alerts/all")
 def api_all_alerts():
-    """Every alert, sorted CRITICAL -> LOW then newest first."""
+    """Every alert, optionally filtered by severity/source/assignee.
+
+    CRITICAL -> LOW then newest first.
+    """
+    where_sql, params = alert_filters()
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT * FROM alerts
-            ORDER BY CASE severity
-                         WHEN 'CRITICAL' THEN 1
-                         WHEN 'HIGH'     THEN 2
-                         WHEN 'MEDIUM'   THEN 3
-                         WHEN 'LOW'      THEN 4
-                         ELSE 5
-                     END,
-                     created_at DESC
-            """
-        )
+        cur.execute("SELECT * FROM alerts" + where_sql + _SEVERITY_ORDER, params)
         rows = cur.fetchall()
     return jsonify([serialize(r) for r in rows])
 
@@ -159,11 +178,11 @@ def api_ingest_alert():
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO alerts (title, category, severity, source_ip, description, status)
-            VALUES (%s, %s, %s, %s, %s, 'open')
+            INSERT INTO alerts (title, category, severity, source, source_ip, description, status)
+            VALUES (%s, %s, %s, %s, %s, %s, 'open')
             RETURNING *
             """,
-            (title, category, severity,
+            (title, category, severity, body.get("source") or None,
              body.get("source_ip") or None, body.get("description") or None),
         )
         created = cur.fetchone()
@@ -240,6 +259,37 @@ def api_stats():
         )
         by_severity = {r["severity"]: r["c"] for r in cur.fetchall()}
 
+        # Detection-source breakdown (the sensor/tool that raised each alert).
+        cur.execute(
+            "SELECT coalesce(source, 'unknown') AS source, count(*) AS c "
+            "FROM alerts GROUP BY source"
+        )
+        by_source = {r["source"]: r["c"] for r in cur.fetchall()}
+
+        # Escalation KPI: of the alerts an analyst has triaged (anything no
+        # longer 'open'), what share were escalated to incident response?
+        cur.execute(
+            """
+            SELECT count(*) FILTER (WHERE status = 'escalated')  AS escalated,
+                   count(*) FILTER (WHERE status <> 'open')      AS triaged
+            FROM alerts
+            """
+        )
+        esc = cur.fetchone()
+        escalated, triaged = esc["escalated"], esc["triaged"]
+        escalation = {
+            "escalated": escalated,
+            "triaged": triaged,
+            "rate": round(100 * escalated / triaged, 1) if triaged else 0.0,
+        }
+
+        # Distinct assignees, for populating the dashboard filter control.
+        cur.execute(
+            "SELECT DISTINCT assigned_to FROM alerts "
+            "WHERE assigned_to IS NOT NULL ORDER BY assigned_to"
+        )
+        assignees = [r["assigned_to"] for r in cur.fetchall()]
+
         # Per-analyst, per-day average response time over the last 7 days.
         cur.execute(
             """
@@ -278,6 +328,9 @@ def api_stats():
             "closed": closed,
             "by_category": by_category,
             "by_severity": by_severity,
+            "by_source": by_source,
+            "escalation": escalation,
+            "assignees": assignees,
             "mttr_by_analyst": mttr_by_analyst,
             "sla": sla,
         }

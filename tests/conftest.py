@@ -25,20 +25,21 @@ import psycopg2  # noqa: E402
 SCHEMA = (ROOT / "schema.sql").read_text()
 
 # Deterministic fixtures. SLA targets: CRITICAL 900s, HIGH 3600s, LOW 86400s.
-#   alert 1: CRITICAL, triaged in 100s   -> within SLA
-#   alert 2: CRITICAL, triaged in 2000s  -> BREACH
-#   alert 3: LOW, open, aged 2 days       -> BREACH (overdue)
-#   alert 4: HIGH, open, just created     -> within SLA
-# => 2 breaches / 4 considered = 50%
+#   alert 1: CRITICAL, triaged (TP) in 100s   -> within SLA, assigned alice
+#   alert 2: CRITICAL, escalated in 2000s     -> BREACH, assigned bob
+#   alert 3: LOW, open, aged 2 days            -> BREACH (overdue)
+#   alert 4: HIGH, open, just created          -> within SLA
+# => SLA: 2 breaches / 4 considered = 50%
+# => escalation: 1 escalated / 2 triaged = 50%
 FIXTURES = """
-INSERT INTO alerts (id, title, category, severity, status, created_at) VALUES
-    (1, 'crit fast',     'brute_force', 'CRITICAL', 'true_positive', now() - interval '1 hour'),
-    (2, 'crit slow',     'malware',     'CRITICAL', 'true_positive', now() - interval '1 hour'),
-    (3, 'low old open',  'anomaly',     'LOW',      'open',          now() - interval '2 days'),
-    (4, 'high new open', 'phishing',    'HIGH',     'open',          now());
+INSERT INTO alerts (id, title, category, severity, source, status, assigned_to, created_at) VALUES
+    (1, 'crit fast',     'brute_force', 'CRITICAL', 'Auth Logs',     'true_positive', 'alice', now() - interval '1 hour'),
+    (2, 'crit slow',     'malware',     'CRITICAL', 'EDR',           'escalated',     'bob',   now() - interval '1 hour'),
+    (3, 'low old open',  'anomaly',     'LOW',      'SIEM/UEBA',     'open',          NULL,    now() - interval '2 days'),
+    (4, 'high new open', 'phishing',    'HIGH',     'Email Gateway', 'open',          NULL,    now());
 INSERT INTO analyst_actions (alert_id, analyst_name, action, response_time_seconds) VALUES
     (1, 'alice', 'classify_tp', 100),
-    (2, 'bob',   'classify_tp', 2000);
+    (2, 'bob',   'escalate',    2000);
 -- advance the SERIAL sequence past the explicit ids so fresh inserts don't collide
 SELECT setval(pg_get_serial_sequence('alerts', 'id'), (SELECT max(id) FROM alerts));
 """

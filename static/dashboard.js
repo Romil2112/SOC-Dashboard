@@ -1,4 +1,4 @@
-// SOC Dashboard — alert queue + live stats.
+// SOC Dashboard — alert queue + live stats with interactive filters.
 "use strict";
 
 const REFRESH_MS = 30000;
@@ -25,7 +25,48 @@ const SEVERITY_BADGE = {
   LOW:      "text-bg-success",
 };
 
-let categoryChart, severityChart;
+// Palette cycled through for the (open-ended) detection-source dimension.
+const SOURCE_PALETTE = ["#3b82f6", "#22c55e", "#eab308", "#f97316", "#8b5cf6",
+                        "#ec4899", "#14b8a6", "#64748b"];
+
+let categoryChart, severityChart, sourceChart;
+
+// ----- filters -------------------------------------------------------------- //
+// Live filter state read from the three <select> controls. Empty string = "all".
+function currentFilters() {
+  return {
+    severity:    (document.getElementById("filter-severity")?.value || "").trim(),
+    source:      (document.getElementById("filter-source")?.value || "").trim(),
+    assigned_to: (document.getElementById("filter-assignee")?.value || "").trim(),
+  };
+}
+
+function filterQuery() {
+  const f = currentFilters();
+  const qs = new URLSearchParams();
+  if (f.severity) qs.set("severity", f.severity);
+  if (f.source) qs.set("source", f.source);
+  if (f.assigned_to) qs.set("assigned_to", f.assigned_to);
+  const s = qs.toString();
+  return s ? `?${s}` : "";
+}
+
+// Populate the source/assignee dropdowns from /api/stats, preserving selection.
+function syncFilterOptions(stats) {
+  fillSelect("filter-source", Object.keys(stats.by_source || {}).sort());
+  fillSelect("filter-assignee", stats.assignees || []);
+}
+
+function fillSelect(id, values) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const current = el.value;
+  const placeholder = el.options[0] ? el.options[0].outerHTML : "";
+  el.innerHTML = placeholder + values
+    .map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`)
+    .join("");
+  if (values.includes(current)) el.value = current;
+}
 
 // ----- analyst name (localStorage) ----------------------------------------- //
 function getAnalyst() {
@@ -60,14 +101,14 @@ function setStatus(text) {
 
 // ----- alerts -------------------------------------------------------------- //
 async function loadAlerts() {
-  const res = await fetch("/api/alerts");
+  const res = await fetch("/api/alerts" + filterQuery());
   const alerts = await res.json();
   const tbody = document.getElementById("alert-rows");
   if (!tbody) return;
 
   if (!alerts.length) {
     tbody.innerHTML =
-      `<tr><td colspan="6" class="text-center text-secondary">Queue is clear 🎉</td></tr>`;
+      `<tr><td colspan="7" class="text-center text-secondary">No matching open alerts 🎉</td></tr>`;
     return;
   }
 
@@ -76,6 +117,7 @@ async function loadAlerts() {
       <td><span class="badge sev-badge ${SEVERITY_BADGE[a.severity] || "text-bg-secondary"}">${a.severity}</span></td>
       <td>${escapeHtml(a.title)}</td>
       <td><span class="text-capitalize">${a.category.replace("_", " ")}</span></td>
+      <td>${escapeHtml(a.source || "—")}</td>
       <td><code>${escapeHtml(a.source_ip || "")}</code></td>
       <td>${ageString(a.created_at)}</td>
       <td class="text-end">
@@ -108,7 +150,7 @@ async function classifyAlert(id, action) {
   await refreshAll();
 }
 
-// ----- stats --------------------------------------------------------------- //
+// ----- stats (KPI cards, global / unfiltered) ------------------------------ //
 async function loadStats() {
   const res = await fetch("/api/stats");
   const stats = await res.json();
@@ -126,14 +168,59 @@ async function loadStats() {
   setText("stat-closed-today", closedToday);
   setText("stat-mttr-today", mttrMin);
   setText("stat-sla-breach", stats.sla ? `${stats.sla.breach_rate}%` : "—");
+  setText("stat-escalation", stats.escalation ? `${stats.escalation.rate}%` : "—");
 
-  updateCharts(stats);
+  syncFilterOptions(stats);
   return stats;
+}
+
+// ----- distribution charts (respond to the active filters) ----------------- //
+function tally(rows, key) {
+  const counts = {};
+  for (const r of rows) {
+    const k = r[key] || "unknown";
+    counts[k] = (counts[k] || 0) + 1;
+  }
+  return counts;
+}
+
+async function loadDistribution() {
+  // Charts reflect the *filtered* alert population (all statuses).
+  const res = await fetch("/api/alerts/all" + filterQuery());
+  const alerts = await res.json();
+
+  const byCategory = tally(alerts, "category");
+  const bySeverity = tally(alerts, "severity");
+  const bySource = tally(alerts, "source");
+
+  if (categoryChart) {
+    const labels = Object.keys(byCategory);
+    categoryChart.data.labels = labels.map(l => l.replace("_", " "));
+    categoryChart.data.datasets[0].data = labels.map(l => byCategory[l]);
+    categoryChart.data.datasets[0].backgroundColor = labels.map(l => CATEGORY_COLORS[l] || "#64748b");
+    categoryChart.update();
+  }
+  if (severityChart) {
+    const order = ["CRITICAL", "HIGH", "MEDIUM", "LOW"];
+    const labels = order.filter(s => s in bySeverity);
+    severityChart.data.labels = labels;
+    severityChart.data.datasets[0].data = labels.map(l => bySeverity[l]);
+    severityChart.data.datasets[0].backgroundColor = labels.map(l => SEVERITY_COLORS[l] || "#64748b");
+    severityChart.update();
+  }
+  if (sourceChart) {
+    const labels = Object.keys(bySource).sort();
+    sourceChart.data.labels = labels;
+    sourceChart.data.datasets[0].data = labels.map(l => bySource[l]);
+    sourceChart.data.datasets[0].backgroundColor = labels.map((_, i) => SOURCE_PALETTE[i % SOURCE_PALETTE.length]);
+    sourceChart.update();
+  }
 }
 
 function initCharts() {
   const catCtx = document.getElementById("categoryChart");
   const sevCtx = document.getElementById("severityChart");
+  const srcCtx = document.getElementById("sourceChart");
   if (catCtx) {
     categoryChart = new Chart(catCtx, {
       type: "doughnut",
@@ -151,25 +238,14 @@ function initCharts() {
                  plugins: { legend: { display: false } } },
     });
   }
-}
-
-function updateCharts(stats) {
-  if (categoryChart && stats.by_category) {
-    const labels = Object.keys(stats.by_category);
-    categoryChart.data.labels = labels.map(l => l.replace("_", " "));
-    categoryChart.data.datasets[0].data = labels.map(l => stats.by_category[l]);
-    categoryChart.data.datasets[0].backgroundColor =
-      labels.map(l => CATEGORY_COLORS[l] || "#64748b");
-    categoryChart.update();
-  }
-  if (severityChart && stats.by_severity) {
-    const order = ["CRITICAL", "HIGH", "MEDIUM", "LOW"];
-    const labels = order.filter(s => s in stats.by_severity);
-    severityChart.data.labels = labels;
-    severityChart.data.datasets[0].data = labels.map(l => stats.by_severity[l]);
-    severityChart.data.datasets[0].backgroundColor =
-      labels.map(l => SEVERITY_COLORS[l] || "#64748b");
-    severityChart.update();
+  if (srcCtx) {
+    sourceChart = new Chart(srcCtx, {
+      type: "bar",
+      data: { labels: [], datasets: [{ label: "Alerts", data: [], backgroundColor: [] }] },
+      options: { indexAxis: "y", responsive: true, maintainAspectRatio: false,
+                 scales: { x: { beginAtZero: true } },
+                 plugins: { legend: { display: false } } },
+    });
   }
 }
 
@@ -188,7 +264,7 @@ function escapeHtml(s) {
 async function refreshAll() {
   setStatus("refreshing…");
   try {
-    await Promise.all([loadAlerts(), loadStats()]);
+    await Promise.all([loadAlerts(), loadStats(), loadDistribution()]);
     setStatus("updated " + new Date().toLocaleTimeString());
   } catch (e) {
     setStatus("error");
@@ -196,9 +272,23 @@ async function refreshAll() {
   }
 }
 
+function initFilters() {
+  ["filter-severity", "filter-source", "filter-assignee"].forEach(id => {
+    document.getElementById(id)?.addEventListener("change", refreshAll);
+  });
+  document.getElementById("filter-clear")?.addEventListener("click", () => {
+    ["filter-severity", "filter-source", "filter-assignee"].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.value = "";
+    });
+    refreshAll();
+  });
+}
+
 // ----- boot ---------------------------------------------------------------- //
 document.addEventListener("DOMContentLoaded", () => {
   initAnalystInput();
+  initFilters();
   initCharts();
   refreshAll();
   setInterval(refreshAll, REFRESH_MS);
