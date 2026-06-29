@@ -3,6 +3,7 @@
 Flask-based Security Operations Center analyst dashboard with a real-time alert queue, SOC KPIs (MTTR, SLA-breach rate, escalation rate), interactive filters, and Chart.js visualizations.
 
 ![CI](https://github.com/Romil2112/SOC-Dashboard/actions/workflows/ci.yml/badge.svg)
+![Tests](https://img.shields.io/badge/pytest-21%20passing-brightgreen?logo=pytest&logoColor=white)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![Flask](https://img.shields.io/badge/Flask-3.x-000000?logo=flask&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
@@ -80,7 +81,7 @@ as a clear, hands-on teaching tool for the alert-triage workflow.
 | Bootstrap 5 | Responsive dark-themed UI, badge system, card layout |
 | SOC Domain Knowledge | Alert triage workflow, MTTR + SLA-breach + escalation-rate KPIs, severity classification, detection-source attribution, analyst performance tracking |
 | Data Filtering | Server-side, injection-safe filtering (whitelisted columns) driving both the queue and the charts |
-| Testing / CI | pytest integration suite (Flask test client + PostgreSQL) run via GitHub Actions with a Postgres service container |
+| Testing / CI | 21 pytest integration tests (Flask test client + PostgreSQL) run via GitHub Actions with a Postgres service container |
 | Docker | Multi-service Compose with health-checked PostgreSQL and volume mounts |
 | Agentic AI Development | Built end-to-end using Claude Code with structured prompt engineering |
 
