@@ -21,9 +21,13 @@
       <a class="navbar-brand fw-bold text-danger" href="/">
         🛡️ SOC Dashboard
       </a>
-      <div class="navbar-nav">
+      <div class="navbar-nav ms-auto align-items-lg-center">
         <a class="nav-link {% block nav_dashboard %}{% endblock %}" href="/">Dashboard</a>
         <a class="nav-link {% block nav_analyst %}{% endblock %}" href="/analyst">Analyst Performance</a>
+        {% if current_user.is_authenticated %}
+        <span class="navbar-text small text-secondary ms-lg-3 me-2">{{ current_user.username }}</span>
+        <a class="nav-link" href="{{ url_for('logout') }}">Logout</a>
+        {% endif %}
       </div>
     </div>
   </nav>
@@ -31,6 +35,11 @@
   <main class="container-fluid py-4">
     {% block content %}{% endblock %}
   </main>
+
+  <footer class="container-fluid py-3 border-top border-secondary text-secondary small">
+    Free &amp; open-source (MIT) · demonstration / trial project · authorized use only · provided as-is, no warranty ·
+    <a class="link-secondary" href="https://github.com/Romil2112/SOC-Dashboard">source on GitHub</a>
+  </footer>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>

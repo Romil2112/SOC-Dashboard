@@ -15,14 +15,28 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-# Must be set before importing app (it reads DATABASE_URL at import time).
+# These must be set before importing app: app.py reads DATABASE_URL and
+# FLASK_SECRET_KEY at module load (and exits if the secret is missing).
+# pytest imports conftest before any test module, so this runs first even for
+# test files that do `from app import ...` at top level.
 os.environ.setdefault(
     "DATABASE_URL", "postgresql://postgres:postgres@localhost:5433/soc_test"
 )
+os.environ.setdefault("FLASK_SECRET_KEY", "test-secret-key")
+os.environ.setdefault("ALERTS_API_KEY", API_KEY := "test-api-key")
+# DB_ENCRYPTION_KEY intentionally left unset here so the integration tests
+# exercise the plaintext (encryption-disabled) path; crypto round-trips are
+# covered separately in test_crypto.py.
 
+import bcrypt  # noqa: E402
 import psycopg2  # noqa: E402
 
 SCHEMA = (ROOT / "schema.sql").read_text()
+
+# A known analyst account used to authenticate the test client.
+TEST_USERNAME = "tester"
+TEST_PASSWORD = "test-password"
+_PW_HASH = bcrypt.hashpw(TEST_PASSWORD.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("ascii")
 
 # Deterministic fixtures. SLA targets: CRITICAL 900s, HIGH 3600s, LOW 86400s.
 #   alert 1: CRITICAL, triaged (TP) in 100s   -> within SLA, assigned alice
@@ -45,16 +59,41 @@ SELECT setval(pg_get_serial_sequence('alerts', 'id'), (SELECT max(id) FROM alert
 """
 
 
-@pytest.fixture()
-def client():
-    import app as soc_app
-
+def _provision():
+    """Apply a clean schema + fixtures + a single test analyst account."""
     conn = psycopg2.connect(os.environ["DATABASE_URL"])
     conn.autocommit = True
     with conn.cursor() as cur:
         cur.execute(SCHEMA)
         cur.execute(FIXTURES)
+        cur.execute(
+            "INSERT INTO users (username, password_hash, role) VALUES (%s, %s, 'analyst')",
+            (TEST_USERNAME, _PW_HASH),
+        )
     conn.close()
 
+
+@pytest.fixture()
+def anon_client():
+    """A test client that is NOT logged in (for auth-boundary tests)."""
+    import app as soc_app
+
+    _provision()
     soc_app.app.config.update(TESTING=True)
     return soc_app.app.test_client()
+
+
+@pytest.fixture()
+def client():
+    """An authenticated test client (existing tests run as a logged-in analyst)."""
+    import app as soc_app
+
+    _provision()
+    soc_app.app.config.update(TESTING=True)
+    c = soc_app.app.test_client()
+    resp = c.post(
+        "/login",
+        data={"username": TEST_USERNAME, "password": TEST_PASSWORD},
+    )
+    assert resp.status_code in (200, 302), "test login failed"
+    return c

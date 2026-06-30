@@ -3,13 +3,14 @@
 Flask-based Security Operations Center analyst dashboard with a real-time alert queue, SOC KPIs (MTTR, SLA-breach rate, escalation rate), interactive filters, and Chart.js visualizations.
 
 ![CI](https://github.com/Romil2112/SOC-Dashboard/actions/workflows/ci.yml/badge.svg)
-![Tests](https://img.shields.io/badge/pytest-21%20passing-brightgreen?logo=pytest&logoColor=white)
+![Tests](https://img.shields.io/badge/pytest-34%20passing-brightgreen?logo=pytest&logoColor=white)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![Flask](https://img.shields.io/badge/Flask-3.x-000000?logo=flask&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
 ![Bootstrap](https://img.shields.io/badge/Bootstrap-5.3-7952B3?logo=bootstrap&logoColor=white)
 ![Chart.js](https://img.shields.io/badge/Chart.js-4.4-FF6384?logo=chartdotjs&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
+![Open Source](https://img.shields.io/badge/Open%20Source-Free%20to%20Use-success.svg)
 
 ## Overview
 
@@ -30,15 +31,17 @@ projects demonstrate the full SOC pipeline: **Ingest → Detect → Triage → R
 
 The intended users are **Tier 1 / Tier 2 SOC analysts** triaging incoming alerts, and
 **SOC team leads / managers** who use the analyst-performance view to monitor MTTR
-KPIs, spot bottlenecks, and understand workload distribution across the team. Because
-it requires no login for the demo (the analyst name is stored client-side), it doubles
-as a clear, hands-on teaching tool for the alert-triage workflow.
+KPIs, spot bottlenecks, and understand workload distribution across the team. Dashboard
+access requires an analyst login (accounts are created via `manage.py`; see
+[Authentication & Security](#authentication--security)), while machine-to-machine alert
+ingest is protected by an API key.
 
 ## Features
 
 - **Real-time alert queue** pulled from PostgreSQL, sorted by severity (CRITICAL → LOW)
 - **One-click triage:** True Positive / False Positive / Escalate buttons per alert
-- **Analyst name saved to `localStorage`** — no login required for the demo
+- **Analyst authentication** via Flask-Login with bcrypt-hashed passwords (no self-registration; accounts created via `manage.py`)
+- **Field-level encryption at rest** (optional) for alert title / source IP / description, plus API-key-protected ingest and configurable retention
 - **MTTR tracking** per analyst per day, with a 7-day trend chart
 - **SLA breach tracking:** per-severity response targets (CRITICAL 15m → LOW 24h) with a live breach-rate KPI
 - **Escalation-rate KPI:** share of triaged alerts escalated to incident response (`escalated / triaged`)
@@ -81,7 +84,8 @@ as a clear, hands-on teaching tool for the alert-triage workflow.
 | Bootstrap 5 | Responsive dark-themed UI, badge system, card layout |
 | SOC Domain Knowledge | Alert triage workflow, MTTR + SLA-breach + escalation-rate KPIs, severity classification, detection-source attribution, analyst performance tracking |
 | Data Filtering | Server-side, injection-safe filtering (whitelisted columns) driving both the queue and the charts |
-| Testing / CI | 21 pytest integration tests (Flask test client + PostgreSQL) run via GitHub Actions with a Postgres service container |
+| Testing / CI | 34 pytest tests (Flask test client + PostgreSQL) run via GitHub Actions with a Postgres service container |
+| Security | Flask-Login analyst auth (bcrypt, 12 rounds), API-key-protected ingest, Fernet field-level encryption at rest, retention purge |
 | Docker | Multi-service Compose with health-checked PostgreSQL and volume mounts |
 | Agentic AI Development | Built end-to-end using Claude Code with structured prompt engineering |
 
@@ -122,6 +126,17 @@ psql soc_dashboard -f schema.sql
 python3 seed.py
 ```
 
+### Configure secrets
+Copy `.env.example` to `.env` and set at least `FLASK_SECRET_KEY` (required — the app will
+not start without it) and `ALERTS_API_KEY` (required for alert ingest). Optionally set
+`DB_ENCRYPTION_KEY` and `ALERT_RETENTION_DAYS`. Generate secrets with
+`python -c "import secrets; print(secrets.token_hex(32))"`.
+
+### Create an analyst account
+```bash
+python3 manage.py create-user alice 's0me-strong-passphrase' --role analyst
+```
+
 ### Run
 ```bash
 python3 app.py
@@ -150,21 +165,106 @@ docker compose up
 or `escalate` (→ `escalated`). Filter query params are validated against a column
 whitelist, so they compose into parameterized SQL safely (no injection surface).
 
+## Authentication & Security
+
+All dashboard pages and analyst-facing APIs require login. Authentication uses
+[Flask-Login](https://flask-login.readthedocs.io/) with **bcrypt-hashed passwords
+(12 rounds)** — plaintext passwords are never stored. There is **no self-registration**;
+accounts are created only from the CLI:
+
+```bash
+python manage.py create-user alice 's0me-strong-passphrase' --role analyst
+python manage.py create-user admin 's0me-strong-passphrase' --role admin
+```
+
+The app reads `FLASK_SECRET_KEY` from the environment and **refuses to start without it**
+(it signs the session cookie). Generate one with:
+
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+Routes `/login` and the machine-to-machine `POST /api/alerts` are the only endpoints not
+behind `@login_required`.
+
+## API Authentication
+
+`POST /api/alerts` (alert ingest) is **machine-to-machine** and is protected by an API key
+rather than a login session. Set `ALERTS_API_KEY` in the environment and send it as the
+`X-API-Key` request header; a missing or incorrect key returns `401`.
+
+```bash
+# generate a key
+python -c "import secrets; print(secrets.token_hex(32))"
+
+# ingest an alert
+curl -X POST http://localhost:8000/api/alerts \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $ALERTS_API_KEY" \
+  -d '{"title":"Brute-force from 10.1.2.3","category":"brute_force","severity":"HIGH","source_ip":"10.1.2.3"}'
+```
+
+log-analyzer's `--push-soc` integration sends this header automatically when
+`ALERTS_API_KEY` is set in its environment.
+
+## Field Encryption at Rest
+
+Setting `DB_ENCRYPTION_KEY` enables **field-level encryption at rest** (Fernet /
+AES-128-CBC + HMAC) for the alert columns that can carry PII or host data —
+**`title`, `source_ip`, `description`**. They are encrypted before `INSERT` and decrypted
+transparently when read back through the API. Columns used for filtering, sorting, and
+aggregation (`severity`, `status`, `category`, `source`, `assigned_to`, timestamps) are
+**never** encrypted, so every chart, filter, and KPI is unaffected.
+
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"   # value for DB_ENCRYPTION_KEY
+```
+
+- If `DB_ENCRYPTION_KEY` is unset, encryption is **disabled gracefully** and values are
+  stored as plaintext. Startup logs print whether encryption is `ACTIVE` or `DISABLED`.
+- Pre-existing plaintext rows remain readable (decryption falls back to the raw value).
+- ⚠️ **Rotating `DB_ENCRYPTION_KEY` without re-encrypting existing rows makes previously
+  encrypted alerts unreadable.** Keep the key stable, or re-encrypt on rotation.
+
+## Data Retention
+
+Set `ALERT_RETENTION_DAYS` (default `0` = retain forever) to automatically purge alerts
+older than *N* days. The purge runs once at application startup and cascades to the
+associated `analyst_actions` rows. Leave it at `0` to disable.
+
+## Privacy & Legal Compliance
+
+Alert data (source IPs, descriptions, titles) may constitute **personal data** under GDPR,
+CCPA, and similar regimes. This project provides controls — authentication, API-key ingest,
+field-level encryption at rest, and retention — to help operators handle that data
+responsibly, but **lawful, compliant operation remains the operator's responsibility**.
+Only ingest and process data from systems you own or are explicitly authorized to monitor.
+
+## Open Source & Responsible Use
+
+This is a free and open-source (MIT) demonstration / trial project, provided **as-is with
+no warranty** and not an audited commercial product. Use it only on systems and data you
+are authorized to operate. See [Legal Notice & Responsible Use](#️-legal-notice--responsible-use).
+
 ## Project Structure
 
 ```
 soc-dashboard/
 ├── app.py                 # Flask app: pages + REST API (psycopg2, no ORM)
-├── schema.sql             # PostgreSQL schema: alerts + analyst_actions tables
+├── crypto.py              # Fernet field-level encryption helpers (encryption at rest)
+├── manage.py              # User-management CLI (create-user)
+├── schema.sql             # PostgreSQL schema: users + alerts + analyst_actions tables
 ├── seed.py                # Inserts 50 realistic demo alerts (+ analyst actions)
 ├── requirements.txt       # Python dependencies
-├── .env.example           # Sample DATABASE_URL / config (copy to .env)
+├── .env.example           # Sample DATABASE_URL / secrets / config (copy to .env)
 ├── Dockerfile             # Flask app image (gunicorn)
 ├── docker-compose.yml     # Flask web + PostgreSQL 16 services
 ├── README.md              # This file
 ├── LICENSE                # MIT license
+├── SECURITY.md            # Security policy & vulnerability reporting
 ├── templates/             # Jinja2 templates
-│   ├── base.html          #   Shared layout: dark navbar, Bootstrap + Chart.js CDNs
+│   ├── base.html          #   Shared layout: dark navbar, footer, Bootstrap + Chart.js CDNs
+│   ├── login.html         #   Analyst sign-in page
 │   ├── dashboard.html     #   KPI cards, filter bar, category/severity/source charts, queue
 │   └── analyst.html       #   MTTR performance table + 7-day trend chart
 ├── static/
@@ -175,3 +275,23 @@ soc-dashboard/
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## ⚖️ Legal Notice & Responsible Use
+
+This project is **free and open-source software**, released under the **MIT License** as a
+**demonstration / learning / trial project**. It is provided **"as is", without warranty of
+any kind**, and is **not an audited or certified commercial security product**.
+
+- **Authorized use only.** Use it solely on systems, networks, and data that you own or are
+  **explicitly authorized** to operate and analyze.
+- **Do no harm.** Do not use it to surveil, stalk, harass, invade the privacy of, or conduct
+  unauthorized monitoring of any person or organization.
+- **Compliance is the operator's responsibility.** Alert data may include IP addresses and
+  other details that qualify as personal data. Compliance with **GDPR, CCPA, HIPAA, and
+  equivalent laws** — where applicable — rests with the operator.
+- **Misuse may be illegal.** Unauthorized access to or monitoring of computer systems may
+  violate laws such as the U.S. **CFAA**, the UK **Computer Misuse Act**, and EU
+  information-systems directives.
+
+By using this software you accept responsibility for operating it lawfully. See
+[SECURITY.md](SECURITY.md) to report a vulnerability.
