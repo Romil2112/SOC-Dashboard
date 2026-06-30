@@ -1,11 +1,21 @@
 """SOC Analyst Dashboard — Flask + psycopg2 (no ORM)."""
+import hmac
 import os
 from datetime import datetime, timezone
 
+import bcrypt
 import psycopg2
 import psycopg2.extras
 from dotenv import load_dotenv
-from flask import Flask, abort, jsonify, render_template, request
+from flask import (
+    Flask, abort, flash, jsonify, redirect, render_template, request, url_for,
+)
+from flask_login import (
+    LoginManager, UserMixin, current_user, login_required, login_user,
+    logout_user,
+)
+
+from crypto import decrypt_field, encrypt_field, get_fernet
 
 load_dotenv()
 
@@ -14,6 +24,64 @@ DATABASE_URL = os.environ.get(
 )
 
 app = Flask(__name__)
+
+# Secret key is mandatory: Flask sessions (and therefore analyst login) are
+# unsafe without it. Read at import so a misconfigured deployment fails fast
+# with an actionable message instead of a cryptic session error later.
+# (Tests set this in tests/conftest.py before importing app.)
+_secret = os.environ.get("FLASK_SECRET_KEY")
+if not _secret:
+    raise RuntimeError(
+        "FLASK_SECRET_KEY is not set. "
+        "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+    )
+app.secret_key = _secret
+
+# API key required to ingest alerts machine-to-machine (POST /api/alerts).
+ALERTS_API_KEY = os.environ.get("ALERTS_API_KEY")
+
+# Number of days to retain alerts (0 = retain forever). Purged once at startup.
+ALERT_RETENTION_DAYS = int(os.environ.get("ALERT_RETENTION_DAYS", "0") or "0")
+
+# Optional field-level encryption at rest. When DB_ENCRYPTION_KEY is unset,
+# FERNET is None and these columns are stored/returned as plaintext.
+FERNET = get_fernet()
+# Alert columns that may carry PII / host data. None are used in
+# WHERE/GROUP BY/ORDER BY, so encrypting them does not affect any filter,
+# chart, or aggregate.
+_ENCRYPTED_ALERT_FIELDS = ("title", "source_ip", "description")
+print(
+    "[+] Field encryption ACTIVE (DB_ENCRYPTION_KEY set)" if FERNET
+    else "[*] Field encryption DISABLED — set DB_ENCRYPTION_KEY to encrypt PII at rest"
+)
+
+# --------------------------------------------------------------------------- #
+# Authentication (Flask-Login)
+# --------------------------------------------------------------------------- #
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = "login"
+
+
+class User(UserMixin):
+    """A dashboard account loaded from the users table."""
+
+    def __init__(self, user_id, username, role):
+        self.id = str(user_id)
+        self.username = username
+        self.role = role
+
+
+@login_manager.user_loader
+def load_user(user_id):
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, username, role FROM users WHERE id = %s", (user_id,)
+        )
+        row = cur.fetchone()
+    if row is None:
+        return None
+    return User(row["id"], row["username"], row["role"])
 
 # Severity ordering used for queue sorting (CRITICAL first).
 SEVERITY_RANK = {"CRITICAL": 1, "HIGH": 2, "MEDIUM": 3, "LOW": 4}
@@ -80,6 +148,35 @@ def serialize(row):
     return out
 
 
+def decrypt_alert(row):
+    """Decrypt the sensitive fields of an alert row in place, then return it.
+
+    Safe when encryption is disabled or the row predates encryption: the
+    underlying decrypt_field passes plaintext through unchanged.
+    """
+    for field in _ENCRYPTED_ALERT_FIELDS:
+        if field in row:
+            row[field] = decrypt_field(FERNET, row[field])
+    return row
+
+
+def purge_old_alerts(days):
+    """Delete alerts (and cascaded analyst_actions) older than `days`.
+
+    No-op when days <= 0. Returns the number of alerts deleted.
+    """
+    if days <= 0:
+        return 0
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "DELETE FROM alerts WHERE created_at < now() - make_interval(days => %s)",
+            (days,),
+        )
+        deleted = cur.rowcount
+        conn.commit()
+    return deleted
+
+
 # Columns the alert-list endpoints can be filtered on, mapped to their request
 # query-parameter names. Only these are honored, so the filter is injection-safe.
 FILTER_COLUMNS = {"severity": "severity", "source": "source", "assigned_to": "assigned_to"}
@@ -117,14 +214,49 @@ _SEVERITY_ORDER = """
 
 
 # --------------------------------------------------------------------------- #
+# Auth routes
+# --------------------------------------------------------------------------- #
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    """Analyst login. No self-registration — accounts come from manage.py."""
+    if request.method == "POST":
+        username = (request.form.get("username") or "").strip()
+        password = request.form.get("password") or ""
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, username, role, password_hash "
+                "FROM users WHERE username = %s",
+                (username,),
+            )
+            row = cur.fetchone()
+        if row and bcrypt.checkpw(
+            password.encode("utf-8"), row["password_hash"].encode("utf-8")
+        ):
+            login_user(User(row["id"], row["username"], row["role"]))
+            return redirect(request.args.get("next") or url_for("dashboard"))
+        flash("Invalid username or password")
+        return render_template("login.html"), 401
+    return render_template("login.html")
+
+
+@app.route("/logout")
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for("login"))
+
+
+# --------------------------------------------------------------------------- #
 # Pages
 # --------------------------------------------------------------------------- #
 @app.route("/")
+@login_required
 def dashboard():
     return render_template("dashboard.html")
 
 
 @app.route("/analyst")
+@login_required
 def analyst():
     return render_template("analyst.html")
 
@@ -133,6 +265,7 @@ def analyst():
 # API
 # --------------------------------------------------------------------------- #
 @app.route("/api/alerts")
+@login_required
 def api_open_alerts():
     """Open queue, optionally filtered by severity/source/assignee.
 
@@ -142,10 +275,11 @@ def api_open_alerts():
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("SELECT * FROM alerts" + where_sql + _SEVERITY_ORDER, params)
         rows = cur.fetchall()
-    return jsonify([serialize(r) for r in rows])
+    return jsonify([serialize(decrypt_alert(r)) for r in rows])
 
 
 @app.route("/api/alerts/all")
+@login_required
 def api_all_alerts():
     """Every alert, optionally filtered by severity/source/assignee.
 
@@ -155,16 +289,21 @@ def api_all_alerts():
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("SELECT * FROM alerts" + where_sql + _SEVERITY_ORDER, params)
         rows = cur.fetchall()
-    return jsonify([serialize(r) for r in rows])
+    return jsonify([serialize(decrypt_alert(r)) for r in rows])
 
 
 @app.route("/api/alerts", methods=["POST"])
 def api_ingest_alert():
     """Ingest a new alert into the open queue.
 
-    This is the entry point that lets an upstream detector (e.g. log-analyzer)
-    push real incidents into the dashboard instead of relying on seed data.
+    This is the machine-to-machine entry point that lets an upstream detector
+    (e.g. log-analyzer) push real incidents into the dashboard. It is NOT behind
+    analyst login; instead it requires a valid X-API-Key header.
     """
+    provided = request.headers.get("X-API-Key", "")
+    if not ALERTS_API_KEY or not hmac.compare_digest(provided, ALERTS_API_KEY):
+        return jsonify({"error": "missing or invalid X-API-Key"}), 401
+
     body = request.get_json(silent=True) or {}
     title    = (body.get("title") or "").strip()
     category = (body.get("category") or "").strip()
@@ -182,15 +321,18 @@ def api_ingest_alert():
             VALUES (%s, %s, %s, %s, %s, %s, 'open')
             RETURNING *
             """,
-            (title, category, severity, body.get("source") or None,
-             body.get("source_ip") or None, body.get("description") or None),
+            (encrypt_field(FERNET, title), category, severity,
+             body.get("source") or None,
+             encrypt_field(FERNET, body.get("source_ip") or None),
+             encrypt_field(FERNET, body.get("description") or None)),
         )
         created = cur.fetchone()
 
-    return jsonify(serialize(created)), 201
+    return jsonify(serialize(decrypt_alert(created))), 201
 
 
 @app.route("/api/alerts/<int:alert_id>/classify", methods=["POST"])
+@login_required
 def api_classify(alert_id):
     """Classify an alert: update status, record the analyst action + MTTR."""
     body = request.get_json(silent=True) or {}
@@ -222,7 +364,7 @@ def api_classify(alert_id):
             """,
             (new_status, analyst_name, alert_id),
         )
-        updated = cur.fetchone()
+        updated = decrypt_alert(cur.fetchone())
 
         # Record the action with a response time measured from alert creation.
         cur.execute(
@@ -240,6 +382,7 @@ def api_classify(alert_id):
 
 
 @app.route("/api/stats")
+@login_required
 def api_stats():
     """Aggregate counts plus per-analyst, per-day MTTR."""
     with get_conn() as conn, conn.cursor() as cur:
@@ -337,6 +480,17 @@ def api_stats():
             "sla": sla,
         }
     )
+
+
+# Enforce retention once at startup (covers both `python app.py` and gunicorn
+# import). Guarded so an unreachable DB at boot never crashes the app.
+if ALERT_RETENTION_DAYS > 0:
+    try:
+        _purged = purge_old_alerts(ALERT_RETENTION_DAYS)
+        print(f"[+] Retention: purged {_purged} alert(s) older than "
+              f"{ALERT_RETENTION_DAYS} day(s)")
+    except Exception as exc:  # pragma: no cover - boot-time best effort
+        print(f"[!] Retention purge skipped: {exc}")
 
 
 if __name__ == "__main__":

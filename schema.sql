@@ -2,6 +2,18 @@
 -- Drop existing objects so the schema can be re-applied cleanly.
 DROP TABLE IF EXISTS analyst_actions CASCADE;
 DROP TABLE IF EXISTS alerts CASCADE;
+DROP TABLE IF EXISTS users CASCADE;
+
+-- Analyst/admin accounts for dashboard login. Passwords are bcrypt-hashed and
+-- never stored in plaintext. Accounts are created only via manage.py (no
+-- self-registration).
+CREATE TABLE IF NOT EXISTS users (
+    id            SERIAL PRIMARY KEY,
+    username      VARCHAR(64) UNIQUE NOT NULL,
+    password_hash TEXT        NOT NULL,
+    role          VARCHAR(16) NOT NULL DEFAULT 'analyst',
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
 -- Security alerts surfaced to the SOC queue.
 --   category: brute_force | malware | phishing | port_scan | anomaly
