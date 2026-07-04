@@ -138,9 +138,9 @@ def build_alerts():
 
     now = datetime.now(timezone.utc)
     alerts = []
-    # Lengths differ by design (48 categories vs 50 severities); pairing stops
-    # at the shorter list, so seeding covers 48 alerts.
-    for category, severity in zip(categories, severities, strict=False):
+    # The category and severity lists are both length 50 by construction;
+    # strict=True makes that invariant explicit and fails loudly if it drifts.
+    for category, severity in zip(categories, severities, strict=True):
         title_tpl, desc_tpl = random.choice(TEMPLATES[category])
         fields = {
             "host": random.choice(HOSTS),

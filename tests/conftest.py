@@ -86,6 +86,15 @@ def anon_client():
 
 
 @pytest.fixture()
+def provisioned_db():
+    """A clean schema + fixtures + test user, without a Flask client.
+
+    For the manage.py / seed.py CLI tests, which talk to the database directly.
+    """
+    _provision()
+
+
+@pytest.fixture()
 def csrf_client():
     """A NOT-logged-in client with CSRF protection ENABLED, for security tests.
 
