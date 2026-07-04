@@ -14,6 +14,7 @@ from flask_login import (
     LoginManager, UserMixin, current_user, login_required, login_user,
     logout_user,
 )
+from flask_wtf.csrf import CSRFProtect
 
 from crypto import decrypt_field, encrypt_field, get_fernet
 
@@ -36,6 +37,12 @@ if not _secret:
         "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
     )
 app.secret_key = _secret
+
+# CSRF protection for the session-authenticated, cookie-based routes (the login
+# form and the analyst classify action). The machine-to-machine ingest endpoint
+# is exempted below: it carries no session cookie and is authenticated by a
+# constant-time X-API-Key check instead, so CSRF does not apply to it.
+csrf = CSRFProtect(app)
 
 # API key required to ingest alerts machine-to-machine (POST /api/alerts).
 ALERTS_API_KEY = os.environ.get("ALERTS_API_KEY")
@@ -214,6 +221,28 @@ _SEVERITY_ORDER = """
 
 
 # --------------------------------------------------------------------------- #
+# Error handling
+# --------------------------------------------------------------------------- #
+# Return clean JSON for the API instead of Flask's default HTML error pages,
+# and never leak a stack trace or internal detail to the client. The 4xx
+# handlers echo the abort() description (which is analyst-facing and safe); the
+# 500 handler returns a fixed generic message so an unexpected exception can't
+# surface internals even if debug is ever left on.
+def _json_error(err):
+    code = getattr(err, "code", 500)
+    return jsonify({"error": getattr(err, "description", "error")}), code
+
+
+for _code in (400, 401, 403, 404, 405, 409):
+    app.register_error_handler(_code, _json_error)
+
+
+@app.errorhandler(500)
+def _handle_500(err):
+    return jsonify({"error": "internal server error"}), 500
+
+
+# --------------------------------------------------------------------------- #
 # Auth routes
 # --------------------------------------------------------------------------- #
 @app.route("/login", methods=["GET", "POST"])
@@ -273,7 +302,9 @@ def api_open_alerts():
     """
     where_sql, params = alert_filters(extra=[("status = %s", "open")])
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("SELECT * FROM alerts" + where_sql + _SEVERITY_ORDER, params)
+        # nosec B608: where_sql is assembled only from the whitelisted
+        # FILTER_COLUMNS names; every value is bound as a parameter.
+        cur.execute("SELECT * FROM alerts" + where_sql + _SEVERITY_ORDER, params)  # nosec B608
         rows = cur.fetchall()
     return jsonify([serialize(decrypt_alert(r)) for r in rows])
 
@@ -287,12 +318,15 @@ def api_all_alerts():
     """
     where_sql, params = alert_filters()
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("SELECT * FROM alerts" + where_sql + _SEVERITY_ORDER, params)
+        # nosec B608: where_sql is assembled only from the whitelisted
+        # FILTER_COLUMNS names; every value is bound as a parameter.
+        cur.execute("SELECT * FROM alerts" + where_sql + _SEVERITY_ORDER, params)  # nosec B608
         rows = cur.fetchall()
     return jsonify([serialize(decrypt_alert(r)) for r in rows])
 
 
 @app.route("/api/alerts", methods=["POST"])
+@csrf.exempt
 def api_ingest_alert():
     """Ingest a new alert into the open queue.
 
@@ -494,4 +528,10 @@ if ALERT_RETENTION_DAYS > 0:
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8000)), debug=True)
+    # Debug and bind address come from the environment so production never runs
+    # the Werkzeug debugger or binds every interface by accident. Defaults are
+    # safe: debugger off, loopback only. Set FLASK_DEBUG=1 for local dev and
+    # HOST=0.0.0.0 when you genuinely need to expose the port (e.g. in Docker).
+    debug = os.environ.get("FLASK_DEBUG", "").lower() in ("1", "true", "yes", "on")
+    host = os.environ.get("HOST", "127.0.0.1")
+    app.run(host=host, port=int(os.environ.get("PORT", 8000)), debug=debug)

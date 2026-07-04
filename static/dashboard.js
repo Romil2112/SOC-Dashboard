@@ -136,9 +136,10 @@ async function classifyAlert(id, action) {
     if (input) input.focus();
     return;
   }
+  const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || "";
   const res = await fetch(`/api/alerts/${id}/classify`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "X-CSRFToken": csrfToken },
     body: JSON.stringify({ analyst, action }),
   });
   if (!res.ok) {

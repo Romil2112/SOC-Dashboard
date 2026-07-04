@@ -1,5 +1,6 @@
 flask>=3.0
 flask-login>=0.6
+flask-wtf>=1.2
 bcrypt>=4.0
 cryptography>=42.0
 psycopg2-binary>=2.9

@@ -79,7 +79,24 @@ def anon_client():
     import app as soc_app
 
     _provision()
-    soc_app.app.config.update(TESTING=True)
+    # CSRF is disabled in tests so the form/JSON POST fixtures don't each need a
+    # token; the protection itself is exercised in test_security.py.
+    soc_app.app.config.update(TESTING=True, WTF_CSRF_ENABLED=False)
+    return soc_app.app.test_client()
+
+
+@pytest.fixture()
+def csrf_client():
+    """A NOT-logged-in client with CSRF protection ENABLED, for security tests.
+
+    CSRFProtect runs in a before_request hook, so a tokenless POST is rejected
+    before the view (and before login_required) ever runs — no session needed
+    to prove the protection is active.
+    """
+    import app as soc_app
+
+    _provision()
+    soc_app.app.config.update(TESTING=True, WTF_CSRF_ENABLED=True)
     return soc_app.app.test_client()
 
 
@@ -89,7 +106,9 @@ def client():
     import app as soc_app
 
     _provision()
-    soc_app.app.config.update(TESTING=True)
+    # CSRF is disabled in tests so the form/JSON POST fixtures don't each need a
+    # token; the protection itself is exercised in test_security.py.
+    soc_app.app.config.update(TESTING=True, WTF_CSRF_ENABLED=False)
     c = soc_app.app.test_client()
     resp = c.post(
         "/login",

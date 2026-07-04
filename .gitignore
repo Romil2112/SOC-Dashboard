@@ -5,3 +5,6 @@ __pycache__/
 venv/
 .DS_Store
 .claude/
+.coverage
+htmlcov/
+.pytest_cache/
