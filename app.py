@@ -8,10 +8,20 @@ import psycopg2
 import psycopg2.extras
 from dotenv import load_dotenv
 from flask import (
-    Flask, abort, flash, jsonify, redirect, render_template, request, url_for,
+    Flask,
+    abort,
+    flash,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    url_for,
 )
 from flask_login import (
-    LoginManager, UserMixin, current_user, login_required, login_user,
+    LoginManager,
+    UserMixin,
+    login_required,
+    login_user,
     logout_user,
 )
 from flask_wtf.csrf import CSRFProtect
