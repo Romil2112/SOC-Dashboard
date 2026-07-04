@@ -91,6 +91,7 @@ class User(UserMixin):
 
 @login_manager.user_loader
 def load_user(user_id):
+    """Flask-Login callback: load the User for a session's user id, or None."""
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT id, username, role FROM users WHERE id = %s", (user_id,)
@@ -290,6 +291,7 @@ def login():
 @app.route("/logout")
 @login_required
 def logout():
+    """Log the analyst out and redirect to the login page."""
     logout_user()
     return redirect(url_for("login"))
 
@@ -300,12 +302,14 @@ def logout():
 @app.route("/")
 @login_required
 def dashboard():
+    """Render the main SOC dashboard page (charts + open-alert queue)."""
     return render_template("dashboard.html")
 
 
 @app.route("/analyst")
 @login_required
 def analyst():
+    """Render the per-analyst metrics page."""
     return render_template("analyst.html")
 
 

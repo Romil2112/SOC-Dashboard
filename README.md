@@ -108,6 +108,37 @@ The two are **wired together for real**, not just conceptually: log-analyzer's
 python log_analyzer.py access.log --no-db --push-soc http://localhost:8000/api/alerts
 ```
 
+## Architecture
+
+Two ways alerts arrive, one queue they land in. A detector (log-analyzer, or any
+tool) pushes alerts over the API-key-protected ingest endpoint; analysts sign in,
+work the queue, and classify each alert, which records an action and its response
+time. Everything reads and writes one PostgreSQL database, and the stats endpoint
+aggregates it into the charts and SLA/MTTR numbers on the dashboard.
+
+```mermaid
+flowchart LR
+    D[Detector<br/>e.g. log-analyzer] -->|POST /api/alerts<br/>X-API-Key| ING[Ingest]
+    A[Analyst<br/>browser] -->|login session| WEB[Dashboard + queue]
+    ING --> DB[(PostgreSQL<br/>alerts · analyst_actions · users)]
+    WEB -->|classify / escalate| DB
+    DB --> STATS[/api/stats<br/>counts · MTTR · SLA · escalation]
+    STATS --> CHARTS[Chart.js dashboard]
+    subgraph Security
+        CSRF[CSRF on session routes]
+        ENC[Fernet field encryption at rest]
+    end
+```
+
+Plaintext view:
+
+```
+detector ──(X-API-Key)──▶ POST /api/alerts ─┐
+analyst  ──(login)──────▶ classify/escalate ─┴─▶ PostgreSQL ─▶ /api/stats ─▶ charts
+                                                  (title/source_ip/description
+                                                   encrypted at rest when a key is set)
+```
+
 ## Quick Start
 
 ### Prerequisites
@@ -246,6 +277,21 @@ This is a free and open-source (MIT) demonstration / trial project, provided **a
 no warranty** and not an audited commercial product. Use it only on systems and data you
 are authorized to operate. See [Legal Notice & Responsible Use](#️-legal-notice--responsible-use).
 
+## Environment Variables
+
+Copy `.env.example` to `.env` and fill these in. The two required ones make the
+app refuse to start (or refuse ingest) if missing; the rest have safe defaults.
+
+| Variable | Required | Default | Purpose |
+|---|---|---|---|
+| `FLASK_SECRET_KEY` | yes | — | Signs analyst login sessions; app won't start without it |
+| `ALERTS_API_KEY` | for ingest | — | `X-API-Key` that `POST /api/alerts` checks (constant-time) |
+| `DATABASE_URL` | — | `postgresql://localhost/soc_dashboard` | PostgreSQL connection string |
+| `DB_ENCRYPTION_KEY` | — | unset (plaintext) | Enables Fernet encryption of title/source_ip/description at rest |
+| `ALERT_RETENTION_DAYS` | — | `0` (keep forever) | Purge alerts older than N days at startup |
+| `FLASK_DEBUG` | — | off | Set `1`/`true` for the Werkzeug debugger (local dev only) |
+| `HOST` / `PORT` | — | `127.0.0.1` / `8000` | Bind address and port for `python app.py` |
+
 ## Project Structure
 
 ```
@@ -271,6 +317,21 @@ soc-dashboard/
 │   └── dashboard.js       # Fetch polling, localStorage, Chart.js render/update
 └── screenshots/           # README images
 ```
+
+## Contributing
+
+Contributions are welcome. A few things that keep the codebase consistent:
+
+- Code is ruff-clean under the rules in `pyproject.toml` (E/W/F/I/N/UP/B) — run
+  `ruff check .` before you open a PR.
+- Tests run against a real PostgreSQL. Point `DATABASE_URL` at a throwaway
+  database and run `pytest`; keep coverage above the current bar (95% line /
+  ≥85% per module). New API behaviour needs a test in `tests/`.
+- Don't weaken the security defaults: session routes stay behind CSRF, the
+  ingest route stays behind `X-API-Key`, and PII columns keep their at-rest
+  encryption path.
+- CI runs the full pytest suite (with a Postgres service) on every push — a PR
+  has to be green to merge.
 
 ## License
 

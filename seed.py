@@ -118,6 +118,7 @@ def rand_public_ip():
 
 
 def rand_internal_ip():
+    """A random RFC1918 internal IPv4 in the 10.x.x.x block."""
     return f"10.{random.randint(0,40)}.{random.randint(0,255)}.{random.randint(1,254)}"
 
 
@@ -172,6 +173,7 @@ def build_alerts():
 
 
 def main():
+    """Truncate and re-seed the database with 50 demo alerts (30 already closed)."""
     alerts = build_alerts()
 
     # Pick 30 of the 50 to be already closed (triaged).

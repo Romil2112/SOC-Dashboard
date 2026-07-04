@@ -56,6 +56,7 @@ def create_user(username, password, role):
 
 
 def main(argv=None):
+    """Parse argv and dispatch the create-user subcommand; return an exit code."""
     parser = argparse.ArgumentParser(description="SOC dashboard user management")
     sub = parser.add_subparsers(dest="command", required=True)
 
