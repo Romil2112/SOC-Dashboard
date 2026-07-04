@@ -312,6 +312,16 @@ def analyst():
 # --------------------------------------------------------------------------- #
 # API
 # --------------------------------------------------------------------------- #
+def _list_alerts(where_sql, params):
+    """Run the shared alert-list query and return decrypted, serialized rows."""
+    with get_conn() as conn, conn.cursor() as cur:
+        # nosec B608: where_sql is assembled only from the whitelisted
+        # FILTER_COLUMNS names; every value is bound as a parameter.
+        cur.execute("SELECT * FROM alerts" + where_sql + _SEVERITY_ORDER, params)  # nosec B608
+        rows = cur.fetchall()
+    return [serialize(decrypt_alert(r)) for r in rows]
+
+
 @app.route("/api/alerts")
 @login_required
 def api_open_alerts():
@@ -320,12 +330,7 @@ def api_open_alerts():
     CRITICAL -> LOW then newest first.
     """
     where_sql, params = alert_filters(extra=[("status = %s", "open")])
-    with get_conn() as conn, conn.cursor() as cur:
-        # nosec B608: where_sql is assembled only from the whitelisted
-        # FILTER_COLUMNS names; every value is bound as a parameter.
-        cur.execute("SELECT * FROM alerts" + where_sql + _SEVERITY_ORDER, params)  # nosec B608
-        rows = cur.fetchall()
-    return jsonify([serialize(decrypt_alert(r)) for r in rows])
+    return jsonify(_list_alerts(where_sql, params))
 
 
 @app.route("/api/alerts/all")
@@ -336,12 +341,7 @@ def api_all_alerts():
     CRITICAL -> LOW then newest first.
     """
     where_sql, params = alert_filters()
-    with get_conn() as conn, conn.cursor() as cur:
-        # nosec B608: where_sql is assembled only from the whitelisted
-        # FILTER_COLUMNS names; every value is bound as a parameter.
-        cur.execute("SELECT * FROM alerts" + where_sql + _SEVERITY_ORDER, params)  # nosec B608
-        rows = cur.fetchall()
-    return jsonify([serialize(decrypt_alert(r)) for r in rows])
+    return jsonify(_list_alerts(where_sql, params))
 
 
 def _valid_api_key():
