@@ -189,20 +189,29 @@ def purge_old_alerts(days):
 FILTER_COLUMNS = {"severity": "severity", "source": "source", "assigned_to": "assigned_to"}
 
 
+def _query_param_filters():
+    """(clauses, values) for the whitelisted severity/source/assignee filters."""
+    where_sql, params = [], []
+    for param, column in FILTER_COLUMNS.items():
+        value = (request.args.get(param) or "").strip()
+        if value:
+            where_sql.append(f"{column} = %s")
+            params.append(value)
+    return where_sql, params
+
+
 def alert_filters(extra=None):
     """Build a parameterized WHERE clause from the request's query string.
 
     Returns (sql, params). `extra` is a list of pre-baked ("col = %s", value)
     predicates (e.g. the open-queue's status filter) merged with user filters.
     """
-    clauses, params = list(extra or []), []
-    where_sql = [c for c, _ in clauses] if clauses else []
-    params = [v for _, v in clauses] if clauses else []
-    for param, column in FILTER_COLUMNS.items():
-        value = (request.args.get(param) or "").strip()
-        if value:
-            where_sql.append(f"{column} = %s")
-            params.append(value)
+    clauses = list(extra or [])
+    where_sql = [c for c, _ in clauses]
+    params = [v for _, v in clauses]
+    extra_sql, extra_params = _query_param_filters()
+    where_sql += extra_sql
+    params += extra_params
     sql = (" WHERE " + " AND ".join(where_sql)) if where_sql else ""
     return sql, params
 
@@ -325,6 +334,34 @@ def api_all_alerts():
     return jsonify([serialize(decrypt_alert(r)) for r in rows])
 
 
+def _valid_api_key():
+    """True if the request carries the configured X-API-Key (constant-time)."""
+    provided = request.headers.get("X-API-Key", "")
+    return bool(ALERTS_API_KEY) and hmac.compare_digest(provided, ALERTS_API_KEY)
+
+
+def _parse_ingest_payload(body):
+    """Pull title/category/severity from an ingest body, aborting 400 if invalid."""
+    title    = (body.get("title") or "").strip()
+    category = (body.get("category") or "").strip()
+    severity = (body.get("severity") or "").strip().upper()
+    if not title or not category:
+        abort(400, description="title and category are required")
+    if severity not in SEVERITY_RANK:
+        abort(400, description="severity must be CRITICAL, HIGH, MEDIUM or LOW")
+    return title, category, severity
+
+
+def _ingest_values(body, title, category, severity):
+    """Build the INSERT parameter tuple, encrypting the PII columns at rest."""
+    return (
+        encrypt_field(FERNET, title), category, severity,
+        body.get("source") or None,
+        encrypt_field(FERNET, body.get("source_ip") or None),
+        encrypt_field(FERNET, body.get("description") or None),
+    )
+
+
 @app.route("/api/alerts", methods=["POST"])
 @csrf.exempt
 def api_ingest_alert():
@@ -334,19 +371,11 @@ def api_ingest_alert():
     (e.g. log-analyzer) push real incidents into the dashboard. It is NOT behind
     analyst login; instead it requires a valid X-API-Key header.
     """
-    provided = request.headers.get("X-API-Key", "")
-    if not ALERTS_API_KEY or not hmac.compare_digest(provided, ALERTS_API_KEY):
+    if not _valid_api_key():
         return jsonify({"error": "missing or invalid X-API-Key"}), 401
 
     body = request.get_json(silent=True) or {}
-    title    = (body.get("title") or "").strip()
-    category = (body.get("category") or "").strip()
-    severity = (body.get("severity") or "").strip().upper()
-
-    if not title or not category:
-        abort(400, description="title and category are required")
-    if severity not in SEVERITY_RANK:
-        abort(400, description="severity must be CRITICAL, HIGH, MEDIUM or LOW")
+    title, category, severity = _parse_ingest_payload(body)
 
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
@@ -355,10 +384,7 @@ def api_ingest_alert():
             VALUES (%s, %s, %s, %s, %s, %s, 'open')
             RETURNING *
             """,
-            (encrypt_field(FERNET, title), category, severity,
-             body.get("source") or None,
-             encrypt_field(FERNET, body.get("source_ip") or None),
-             encrypt_field(FERNET, body.get("description") or None)),
+            _ingest_values(body, title, category, severity),
         )
         created = cur.fetchone()
 
