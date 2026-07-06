@@ -2,6 +2,20 @@
 
 SOC Dashboard is a Flask and PostgreSQL web app for triaging security alerts. It takes alerts over a REST API (log-analyzer pushes them, though any tool sending the right JSON works), holds them in a severity-ranked queue, and lets an analyst mark each one true positive, false positive, or escalation in a single click. It timestamps every action and turns those into SOC KPIs (MTTR, SLA-breach rate, escalation rate) drawn with Chart.js. It is the triage stage of a two-part pipeline: [log-analyzer](https://github.com/Romil2112/log-analyzer) detects the incidents, SOC Dashboard is where a person works them.
 
+## Screenshots
+
+Main dashboard: severity KPIs, category / severity / source charts, and the open-alert queue.
+
+![SOC Dashboard main view](screenshots/dashboard.png)
+
+The alert queue, with one-click triage on every alert.
+
+![Alert queue](screenshots/alert-queue.png)
+
+Analyst performance and the MTTR trend over the week.
+
+![Analyst performance](screenshots/analyst-performance.png)
+
 ## How it works
 
 Alerts reach the dashboard two ways and both land in one queue. A detector POSTs to the ingest endpoint with an API key; analysts sign in and work the queue in the browser. Every read and write goes through one PostgreSQL database holding three tables (alerts, analyst_actions, users), and `/api/stats` aggregates that into the charts and the SLA and MTTR numbers.
@@ -49,7 +63,7 @@ python manage.py create-user alice 's0me-strong-passphrase' --role analyst
 python app.py
 ```
 
-It listens on <http://localhost:8000>. `docker compose up` starts Flask and PostgreSQL together instead.
+The `create-user` line is how you create your login — there is no sign-up page, so run it before the first launch (use `--role admin` for full access). It listens on <http://localhost:8000>. `docker compose up` starts Flask and PostgreSQL together instead.
 
 ## API reference
 
