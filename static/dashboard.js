@@ -99,6 +99,21 @@ function setStatus(text) {
   if (el) el.textContent = text;
 }
 
+// Provenance tag: which Conductor run produced this alert, with per-task timings
+// (from run_metadata) shown in the tooltip. Empty for manually-created alerts.
+function runTag(a) {
+  if (!a.workflow_run_id) return "";
+  let tip = "workflow run " + a.workflow_run_id;
+  try {
+    const m = a.run_metadata ? JSON.parse(a.run_metadata) : null;
+    if (m && m.task_seconds) {
+      tip += "\n" + Object.entries(m.task_seconds).map(([k, v]) => `${k}: ${v}s`).join("\n");
+    }
+  } catch (e) { /* fall back to the id alone */ }
+  return `<br><span class="badge text-bg-dark font-monospace" style="font-size:.7em"`
+       + ` title="${escapeHtml(tip)}">run ${escapeHtml(a.workflow_run_id.slice(0, 8))}</span>`;
+}
+
 // ----- alerts -------------------------------------------------------------- //
 async function loadAlerts() {
   const res = await fetch("/api/alerts" + filterQuery());
@@ -118,7 +133,7 @@ async function loadAlerts() {
       <td>${escapeHtml(a.title)}</td>
       <td><span class="text-capitalize">${a.category.replace("_", " ")}</span></td>
       <td>${escapeHtml(a.source || "—")}</td>
-      <td><code>${escapeHtml(a.source_ip || "")}</code></td>
+      <td><code>${escapeHtml(a.source_ip || "")}</code>${runTag(a)}</td>
       <td>${ageString(a.created_at)}</td>
       <td class="text-end">
         <button class="btn btn-sm btn-outline-success"  onclick="classifyAlert(${a.id}, 'classify_tp')">TP</button>

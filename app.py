@@ -367,12 +367,17 @@ def _parse_ingest_payload(body):
 
 
 def _ingest_values(body, title, category, severity):
-    """Build the INSERT parameter tuple, encrypting the PII columns at rest."""
+    """Build the INSERT parameter tuple, encrypting the PII columns at rest.
+
+    workflow_run_id / run_metadata are provenance from an upstream Conductor run; they
+    are not PII, so they are stored plaintext (keeping them queryable/filterable)."""
     return (
         encrypt_field(FERNET, title), category, severity,
         body.get("source") or None,
         encrypt_field(FERNET, body.get("source_ip") or None),
         encrypt_field(FERNET, body.get("description") or None),
+        body.get("workflow_run_id") or None,
+        body.get("run_metadata") or None,
     )
 
 
@@ -394,8 +399,9 @@ def api_ingest_alert():
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO alerts (title, category, severity, source, source_ip, description, status)
-            VALUES (%s, %s, %s, %s, %s, %s, 'open')
+            INSERT INTO alerts (title, category, severity, source, source_ip, description,
+                                workflow_run_id, run_metadata, status)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'open')
             RETURNING *
             """,
             _ingest_values(body, title, category, severity),

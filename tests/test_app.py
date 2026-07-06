@@ -152,6 +152,8 @@ def test_ingest_alert_creates_open_alert(client):
         "source": "Auth Logs",
         "source_ip": "10.1.2.3",
         "description": "120 failed logins; MITRE T1110.001.",
+        "workflow_run_id": "wf-abc123",
+        "run_metadata": '{"workflow_id": "wf-abc123", "task_seconds": {"push_ref": 0.2}}',
     }
     resp = client.post("/api/alerts", data=json.dumps(payload),
                        content_type="application/json", headers=API_HEADERS)
@@ -160,6 +162,9 @@ def test_ingest_alert_creates_open_alert(client):
     assert created["status"] == "open"
     assert created["source"] == "Auth Logs"
     assert created["source_ip"] == "10.1.2.3"
+    # provenance from an upstream Conductor run round-trips (stored plaintext, not encrypted)
+    assert created["workflow_run_id"] == "wf-abc123"
+    assert "push_ref" in created["run_metadata"]
     # the ingested alert is now in the open queue
     open_titles = [r["title"] for r in client.get("/api/alerts").get_json()]
     assert payload["title"] in open_titles

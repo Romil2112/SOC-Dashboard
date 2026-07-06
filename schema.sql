@@ -20,19 +20,24 @@ CREATE TABLE IF NOT EXISTS users (
 --   severity: CRITICAL | HIGH | MEDIUM | LOW
 --   status:   open | true_positive | false_positive | escalated
 --   source:   detecting sensor/tool (EDR, Firewall/IDS, Email Gateway, ...)
+--   workflow_run_id / run_metadata: optional provenance from an upstream
+--     Orkes Conductor pipeline run (which run produced this alert + per-task
+--     timings, JSON). Both NULL for manually-created or non-orchestrated alerts.
 CREATE TABLE alerts (
-    id          SERIAL PRIMARY KEY,
-    title       TEXT        NOT NULL,
-    category    TEXT        NOT NULL,
-    severity    TEXT        NOT NULL
-                CHECK (severity IN ('CRITICAL', 'HIGH', 'MEDIUM', 'LOW')),
-    source      TEXT,
-    source_ip   TEXT,
-    description TEXT,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    status      TEXT        NOT NULL DEFAULT 'open'
-                CHECK (status IN ('open', 'true_positive', 'false_positive', 'escalated')),
-    assigned_to TEXT
+    id              SERIAL PRIMARY KEY,
+    title           TEXT        NOT NULL,
+    category        TEXT        NOT NULL,
+    severity        TEXT        NOT NULL
+                    CHECK (severity IN ('CRITICAL', 'HIGH', 'MEDIUM', 'LOW')),
+    source          TEXT,
+    source_ip       TEXT,
+    description     TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    status          TEXT        NOT NULL DEFAULT 'open'
+                    CHECK (status IN ('open', 'true_positive', 'false_positive', 'escalated')),
+    assigned_to     TEXT,
+    workflow_run_id TEXT,
+    run_metadata    TEXT
 );
 
 -- Actions an analyst took to triage an alert.
