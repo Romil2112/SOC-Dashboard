@@ -1,7 +1,7 @@
 """SOC Analyst Dashboard — Flask + psycopg2 (no ORM)."""
 import hmac
 import os
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import bcrypt
 import psycopg2
@@ -157,13 +157,10 @@ def get_conn():
 
 def serialize(row):
     """Convert datetime/date values in a row dict to ISO strings."""
-    out = {}
-    for key, value in row.items():
-        if hasattr(value, "isoformat"):
-            out[key] = value.isoformat()
-        else:
-            out[key] = value
-    return out
+    return {
+        key: value.isoformat() if isinstance(value, (datetime, date)) else value
+        for key, value in row.items()
+    }
 
 
 def decrypt_alert(row):
@@ -200,17 +197,6 @@ def purge_old_alerts(days):
 FILTER_COLUMNS = {"severity": "severity", "source": "source", "assigned_to": "assigned_to"}
 
 
-def _query_param_filters():
-    """(clauses, values) for the whitelisted severity/source/assignee filters."""
-    where_sql, params = [], []
-    for param, column in FILTER_COLUMNS.items():
-        value = (request.args.get(param) or "").strip()
-        if value:
-            where_sql.append(f"{column} = %s")
-            params.append(value)
-    return where_sql, params
-
-
 def alert_filters(extra=None):
     """Build a parameterized WHERE clause from the request's query string.
 
@@ -220,9 +206,11 @@ def alert_filters(extra=None):
     clauses = list(extra or [])
     where_sql = [c for c, _ in clauses]
     params = [v for _, v in clauses]
-    extra_sql, extra_params = _query_param_filters()
-    where_sql += extra_sql
-    params += extra_params
+    for param, column in FILTER_COLUMNS.items():
+        value = (request.args.get(param) or "").strip()
+        if value:
+            where_sql.append(f"{column} = %s")
+            params.append(value)
     sql = (" WHERE " + " AND ".join(where_sql)) if where_sql else ""
     return sql, params
 
