@@ -16,6 +16,10 @@ Analyst performance and the MTTR trend over the week.
 
 ![Analyst performance](screenshots/analyst-performance.png)
 
+Dashboard walkthrough — KPI cards, alert queue with one-click triage, and analyst performance view:
+
+![SOC Dashboard demo](screenshots/soc_dashboard_demo.gif)
+
 ## How it works
 
 Alerts reach the dashboard two ways and both land in one queue. A detector POSTs to the ingest endpoint with an API key; analysts sign in and work the queue in the browser. Every read and write goes through one PostgreSQL database holding three tables (alerts, analyst_actions, users), and `/api/stats` aggregates that into the charts and the SLA and MTTR numbers.
@@ -38,32 +42,64 @@ Security sits on a few specific choices. The ingest endpoint checks its API key 
 - 50 pre-seeded demo alerts across 5 categories, 4 severities, and 5 detection sources
 - 48 pytest tests at 95% line / 92% branch coverage, run against a real PostgreSQL
 
-## Quick Start
+## Running the Project
 
-Prerequisites: Python 3.12+ and PostgreSQL 14+.
+**Prerequisites:** Python 3.12+ and PostgreSQL 14+.
 
-Install:
+**1. Set up a virtual environment**
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-Create and seed the database:
+**2. Create and seed the database**
 
 ```bash
 createdb soc_dashboard
 psql soc_dashboard -f schema.sql
-python seed.py
+python seed.py        # loads 50 demo alerts across 5 categories and severities
 ```
 
-Copy `.env.example` to `.env` and set at least `FLASK_SECRET_KEY` (the app will not start without it) and `ALERTS_API_KEY` (required for ingest). Generate a value with `python -c "import secrets; print(secrets.token_hex(32))"`. Create an analyst account, then run the app:
+**3. Configure secrets**
+
+```bash
+cp .env.example .env
+```
+
+Open `.env` and set the two required values. Generate each with `python -c "import secrets; print(secrets.token_hex(32))"`:
+
+```
+FLASK_SECRET_KEY=<generated>    # required — app refuses to start without it
+ALERTS_API_KEY=<generated>      # required — ingest endpoint rejects requests without it
+DB_ENCRYPTION_KEY=<generated>   # optional — enables Fernet encryption of PII fields
+```
+
+**4. Create an analyst account**
+
+There is no sign-up page; all accounts are created from the CLI:
 
 ```bash
 python manage.py create-user alice 's0me-strong-passphrase' --role analyst
+# use --role admin for full access
+```
+
+**5. Start the app**
+
+```bash
 python app.py
 ```
 
-The `create-user` line is how you create your login — there is no sign-up page, so run it before the first launch (use `--role admin` for full access). It listens on <http://localhost:8000>. `docker compose up` starts Flask and PostgreSQL together instead.
+Open <http://localhost:8000> and sign in with the credentials you created. The main dashboard loads immediately with the seeded demo alerts.
+
+**With Docker Compose** (PostgreSQL + Flask in one command)
+
+```bash
+docker compose up
+```
+
+The `docker-compose.yml` starts PostgreSQL, runs the schema migration, and starts Flask — no separate database setup required. It still needs `FLASK_SECRET_KEY` and `ALERTS_API_KEY` set in `.env`.
 
 ## API reference
 
