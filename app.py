@@ -1,7 +1,10 @@
 """SOC Analyst Dashboard — Flask + psycopg2 (no ORM)."""
 import hmac
 import os
+import queue
+import threading
 from datetime import date, datetime, timezone
+from functools import wraps
 
 import bcrypt
 import psycopg2
@@ -9,6 +12,7 @@ import psycopg2.extras
 from dotenv import load_dotenv
 from flask import (
     Flask,
+    Response,
     abort,
     flash,
     jsonify,
@@ -20,6 +24,7 @@ from flask import (
 from flask_login import (
     LoginManager,
     UserMixin,
+    current_user,
     login_required,
     login_user,
     logout_user,
@@ -71,6 +76,56 @@ print(
     "[+] Field encryption ACTIVE (DB_ENCRYPTION_KEY set)" if FERNET
     else "[*] Field encryption DISABLED — set DB_ENCRYPTION_KEY to encrypt PII at rest"
 )
+
+# --------------------------------------------------------------------------- #
+# Role-based access control
+# --------------------------------------------------------------------------- #
+def require_role(*roles):
+    """Decorator: require current_user.role to be in roles, or abort 403."""
+    def decorator(f):
+        @wraps(f)
+        def wrapped(*args, **kwargs):
+            if not current_user.is_authenticated:
+                abort(401)
+            if current_user.role not in roles:
+                abort(403, description="insufficient role")
+            return f(*args, **kwargs)
+        return wrapped
+    return decorator
+
+
+# --------------------------------------------------------------------------- #
+# In-process pub/sub for Server-Sent Events
+# --------------------------------------------------------------------------- #
+_sse_subscribers: list = []
+_sse_lock = threading.Lock()
+
+
+def _sse_publish(event: dict) -> None:
+    """Broadcast an event dict to all SSE subscribers."""
+    with _sse_lock:
+        dead = []
+        for q in _sse_subscribers:
+            try:
+                q.put_nowait(event)
+            except queue.Full:
+                dead.append(q)
+        for q in dead:
+            _sse_subscribers.remove(q)
+
+
+def _sse_subscribe():
+    q = queue.Queue(maxsize=100)
+    with _sse_lock:
+        _sse_subscribers.append(q)
+    return q
+
+
+def _sse_unsubscribe(q) -> None:
+    with _sse_lock:
+        if q in _sse_subscribers:
+            _sse_subscribers.remove(q)
+
 
 # --------------------------------------------------------------------------- #
 # Authentication (Flask-Login)
@@ -211,6 +266,11 @@ def alert_filters(extra=None):
         if value:
             where_sql.append(f"{column} = %s")
             params.append(value)
+    # created_after: ISO datetime string (additive param, no existing filter affected)
+    created_after = (request.args.get("created_after") or "").strip()
+    if created_after:
+        where_sql.append("created_at >= %s")
+        params.append(created_after)
     sql = (" WHERE " + " AND ".join(where_sql)) if where_sql else ""
     return sql, params
 
@@ -396,11 +456,19 @@ def api_ingest_alert():
         )
         created = cur.fetchone()
 
-    return jsonify(serialize(decrypt_alert(created))), 201
+    row = serialize(decrypt_alert(dict(created)))
+    _sse_publish({
+        "type": "new_alert",
+        "alert_id": row["id"],
+        "severity": row["severity"],
+        "status": row["status"],
+    })
+    return jsonify(row), 201
 
 
 @app.route("/api/alerts/<int:alert_id>/classify", methods=["POST"])
 @login_required
+@require_role("analyst", "admin")
 def api_classify(alert_id):
     """Classify an alert: update status, record the analyst action + MTTR."""
     body = request.get_json(silent=True) or {}
@@ -445,8 +513,31 @@ def api_classify(alert_id):
             """,
             (alert_id, analyst_name, action, alert["created_at"]),
         )
+        # Audit trail — same transaction as the alert update (atomic).
+        cur.execute(
+            """
+            INSERT INTO audit_log
+                (alert_id, user_id, username, action, from_status, to_status)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """,
+            (
+                alert_id,
+                int(current_user.id),
+                current_user.username,
+                action,
+                alert["status"],
+                new_status,
+            ),
+        )
 
-    return jsonify(serialize(updated))
+    result = serialize(updated)
+    _sse_publish({
+        "type": "status_change",
+        "alert_id": alert_id,
+        "severity": updated.get("severity"),
+        "status": new_status,
+    })
+    return jsonify(result)
 
 
 @app.route("/api/stats")
@@ -553,6 +644,159 @@ def api_stats():
             "mttr_by_analyst": mttr_by_analyst,
             "sla": sla,
         }
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Audit trail routes
+# --------------------------------------------------------------------------- #
+@app.route("/api/alerts/<int:alert_id>/audit")
+@login_required
+def api_alert_audit(alert_id):
+    """Return the audit history for a single alert as JSON."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT id, alert_id, user_id, username, action,
+                   from_status, to_status, note, created_at
+            FROM audit_log
+            WHERE alert_id = %s
+            ORDER BY created_at ASC
+            """,
+            (alert_id,),
+        )
+        rows = cur.fetchall()
+    result = []
+    for r in rows:
+        row = dict(r)
+        row["note"] = decrypt_field(FERNET, row["note"])
+        result.append(serialize(row))
+    return jsonify(result)
+
+
+@app.route("/audit")
+@login_required
+@require_role("admin")
+def audit_log_page():
+    """Paginated audit log view, admin-only."""
+    page = max(1, int(request.args.get("page", 1)))
+    per_page = 50
+    offset = (page - 1) * per_page
+    search = (request.args.get("q") or "").strip()
+
+    with get_conn() as conn, conn.cursor() as cur:
+        if search:
+            cur.execute(
+                """
+                SELECT al.id, al.alert_id, al.username, al.action,
+                       al.from_status, al.to_status, al.created_at, al.note
+                FROM audit_log al
+                WHERE al.username ILIKE %s OR al.action ILIKE %s
+                ORDER BY al.created_at DESC
+                LIMIT %s OFFSET %s
+                """,
+                (f"%{search}%", f"%{search}%", per_page, offset),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT al.id, al.alert_id, al.username, al.action,
+                       al.from_status, al.to_status, al.created_at, al.note
+                FROM audit_log al
+                ORDER BY al.created_at DESC
+                LIMIT %s OFFSET %s
+                """,
+                (per_page, offset),
+            )
+        rows = cur.fetchall()
+        cur.execute("SELECT count(*) AS c FROM audit_log")
+        total = cur.fetchone()["c"]
+
+    entries = []
+    for r in rows:
+        row = dict(r)
+        row["note"] = decrypt_field(FERNET, row["note"])
+        entries.append(serialize(row))
+
+    return render_template(
+        "audit.html",
+        entries=entries,
+        page=page,
+        per_page=per_page,
+        total=total,
+        search=search,
+    )
+
+
+@app.route("/api/alerts/<int:alert_id>/notes", methods=["POST"])
+@login_required
+@require_role("analyst", "admin")
+def api_add_note(alert_id):
+    """Add a case note to an alert. Stored encrypted, logged in audit_log."""
+    body = request.get_json(silent=True) or {}
+    note = (body.get("note") or "").strip()
+    if not note:
+        abort(400, description="note is required")
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT status FROM alerts WHERE id = %s", (alert_id,))
+        alert = cur.fetchone()
+        if alert is None:
+            abort(404, description="alert not found")
+
+        cur.execute(
+            """
+            INSERT INTO audit_log
+                (alert_id, user_id, username, action, from_status, to_status, note)
+            VALUES (%s, %s, %s, 'note_added', %s, %s, %s)
+            RETURNING id, created_at
+            """,
+            (
+                alert_id,
+                int(current_user.id),
+                current_user.username,
+                alert["status"],
+                alert["status"],
+                encrypt_field(FERNET, note),
+            ),
+        )
+        row = cur.fetchone()
+
+    return jsonify({"id": row["id"], "created_at": row["created_at"].isoformat()}), 201
+
+
+# --------------------------------------------------------------------------- #
+# Server-Sent Events
+# --------------------------------------------------------------------------- #
+@app.route("/api/stream")
+@login_required
+def api_stream():
+    """SSE endpoint for live queue updates.
+
+    Publishes new_alert and status_change events. Uses an in-process Queue;
+    only works within a single worker process. For multi-worker deployments,
+    replace with Redis pub/sub.
+    """
+    import json as _json
+
+    def generate():
+        q = _sse_subscribe()
+        try:
+            while True:
+                try:
+                    event = q.get(timeout=30)
+                    yield f"data: {_json.dumps(event)}\n\n"
+                except queue.Empty:
+                    yield ": keepalive\n\n"
+        except GeneratorExit:
+            pass
+        finally:
+            _sse_unsubscribe(q)
+
+    return Response(
+        generate(),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 

@@ -3,6 +3,7 @@
 {% block nav_dashboard %}active{% endblock %}
 
 {% block content %}
+<script>window.SOC_USER_ROLE = "{{ current_user.role }}";</script>
 <!-- Row 1: stat cards -->
 <div class="row row-cols-2 row-cols-md-3 row-cols-xl-6 g-3 mb-4">
   <div class="col">
@@ -53,6 +54,15 @@
       </div>
     </div>
   </div>
+</div>
+
+<!-- Quick filter presets -->
+<div class="d-flex flex-wrap gap-2 mb-3" id="preset-buttons">
+  <span class="text-secondary small align-self-center me-1">Quick filters:</span>
+  <button class="btn btn-sm btn-outline-info"      onclick="applyPreset('my-queue')">My Queue</button>
+  <button class="btn btn-sm btn-outline-danger"    onclick="applyPreset('critical-today')">Critical Today</button>
+  <button class="btn btn-sm btn-outline-warning"   onclick="applyPreset('escalated')">Escalated</button>
+  <button class="btn btn-sm btn-outline-secondary" onclick="applyPreset('all-open')">All Open</button>
 </div>
 
 <!-- Filter bar: drives the charts and the alert queue below -->

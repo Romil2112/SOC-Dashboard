@@ -3,6 +3,8 @@
 
 const REFRESH_MS = 30000;
 
+let _activePreset = null;  // tracks which quick-filter preset is active
+
 const CATEGORY_COLORS = {
   brute_force: "#ef4444",
   malware:     "#f97316",
@@ -49,6 +51,41 @@ function filterQuery() {
   if (f.assigned_to) qs.set("assigned_to", f.assigned_to);
   const s = qs.toString();
   return s ? `?${s}` : "";
+}
+
+// Returns query string for the active preset (merged with filter selects).
+function presetQuery() {
+  if (!_activePreset) return filterQuery();
+  const f = currentFilters();
+  const qs = new URLSearchParams();
+  if (f.severity) qs.set("severity", f.severity);
+  if (f.source) qs.set("source", f.source);
+  if (f.assigned_to) qs.set("assigned_to", f.assigned_to);
+
+  if (_activePreset === "my-queue") {
+    const analyst = getAnalyst();
+    if (analyst) qs.set("assigned_to", analyst);
+  } else if (_activePreset === "critical-today") {
+    qs.set("severity", "CRITICAL");
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    qs.set("created_after", today.toISOString());
+  }
+  // "escalated" and "all-open" handled in loadAlerts
+  const s = qs.toString();
+  return s ? `?${s}` : "";
+}
+
+async function applyPreset(preset) {
+  _activePreset = preset;
+  document.querySelectorAll("#preset-buttons button").forEach(btn => {
+    const map = {
+      "my-queue": "My Queue", "critical-today": "Critical Today",
+      "escalated": "Escalated", "all-open": "All Open",
+    };
+    btn.classList.toggle("active", btn.textContent.trim() === (map[preset] || ""));
+  });
+  await refreshAll();
 }
 
 // Populate the source/assignee dropdowns from /api/stats, preserving selection.
@@ -116,8 +153,18 @@ function runTag(a) {
 
 // ----- alerts -------------------------------------------------------------- //
 async function loadAlerts() {
-  const res = await fetch("/api/alerts" + filterQuery());
-  const alerts = await res.json();
+  let alerts;
+  if (_activePreset === "escalated") {
+    const res = await fetch("/api/alerts/all" + filterQuery());
+    const all = await res.json();
+    alerts = all.filter(a => a.status === "escalated");
+  } else if (_activePreset === "all-open") {
+    const res = await fetch("/api/alerts" + filterQuery());
+    alerts = await res.json();
+  } else {
+    const res = await fetch("/api/alerts" + presetQuery());
+    alerts = await res.json();
+  }
   const tbody = document.getElementById("alert-rows");
   if (!tbody) return;
 
@@ -127,6 +174,7 @@ async function loadAlerts() {
     return;
   }
 
+  const isViewer = (window.SOC_USER_ROLE === "viewer");
   tbody.innerHTML = alerts.map(a => `
     <tr data-id="${a.id}">
       <td><span class="badge sev-badge ${SEVERITY_BADGE[a.severity] || "text-bg-secondary"}">${a.severity}</span></td>
@@ -136,9 +184,12 @@ async function loadAlerts() {
       <td><code>${escapeHtml(a.source_ip || "")}</code>${runTag(a)}</td>
       <td>${ageString(a.created_at)}</td>
       <td class="text-end">
-        <button class="btn btn-sm btn-outline-success"  onclick="classifyAlert(${a.id}, 'classify_tp')">TP</button>
-        <button class="btn btn-sm btn-outline-secondary" onclick="classifyAlert(${a.id}, 'classify_fp')">FP</button>
-        <button class="btn btn-sm btn-outline-danger"   onclick="classifyAlert(${a.id}, 'escalate')">Escalate</button>
+        ${isViewer
+          ? `<span class="text-secondary small" title="Viewer accounts are read-only — contact an admin to triage">Read-only</span>`
+          : `<button class="btn btn-sm btn-outline-success"  onclick="classifyAlert(${a.id}, 'classify_tp')">TP</button>
+             <button class="btn btn-sm btn-outline-secondary" onclick="classifyAlert(${a.id}, 'classify_fp')">FP</button>
+             <button class="btn btn-sm btn-outline-danger"   onclick="classifyAlert(${a.id}, 'escalate')">Escalate</button>`
+        }
       </td>
     </tr>`).join("");
 }
@@ -301,11 +352,30 @@ function initFilters() {
   });
 }
 
+// ----- SSE (live updates, polling is the fallback) -------------------------- //
+function initSSE() {
+  if (!window.EventSource) return;  // browser doesn't support SSE
+  const es = new EventSource("/api/stream");
+  es.onmessage = async (e) => {
+    try {
+      const event = JSON.parse(e.data);
+      if (event.type === "new_alert" || event.type === "status_change") {
+        await refreshAll();
+      }
+    } catch (_) { /* ignore malformed events */ }
+  };
+  es.onerror = () => {
+    // SSE disconnected — polling fallback already running via setInterval.
+    es.close();
+  };
+}
+
 // ----- boot ---------------------------------------------------------------- //
 document.addEventListener("DOMContentLoaded", () => {
   initAnalystInput();
   initFilters();
   initCharts();
   refreshAll();
-  setInterval(refreshAll, REFRESH_MS);
+  setInterval(refreshAll, REFRESH_MS);  // polling fallback always runs
+  initSSE();  // SSE as primary path; polling is the fallback if it fails
 });

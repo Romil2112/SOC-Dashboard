@@ -27,8 +27,14 @@
       <div class="navbar-nav ms-auto align-items-lg-center">
         <a class="nav-link {% block nav_dashboard %}{% endblock %}" href="/">Dashboard</a>
         <a class="nav-link {% block nav_analyst %}{% endblock %}" href="/analyst">Analyst Performance</a>
+        {% if current_user.is_authenticated and current_user.role == 'admin' %}
+        <a class="nav-link {% block nav_audit %}{% endblock %}" href="/audit">Audit Log</a>
+        {% endif %}
         {% if current_user.is_authenticated %}
-        <span class="navbar-text small text-secondary ms-lg-3 me-2">{{ current_user.username }}</span>
+        <span class="navbar-text small text-secondary ms-lg-3 me-2">
+          {{ current_user.username }}
+          <span class="badge text-bg-secondary ms-1" style="font-size:.65em">{{ current_user.role }}</span>
+        </span>
         <a class="nav-link" href="{{ url_for('logout') }}">Logout</a>
         {% endif %}
       </div>

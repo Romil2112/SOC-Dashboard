@@ -58,3 +58,21 @@ CREATE INDEX idx_alerts_source   ON alerts(source);
 CREATE INDEX idx_alerts_assigned ON alerts(assigned_to);
 CREATE INDEX idx_actions_alert   ON analyst_actions(alert_id);
 CREATE INDEX idx_actions_analyst ON analyst_actions(analyst_name);
+
+-- Audit log: every status change or analyst note is recorded here atomically
+-- with the corresponding alert update (same transaction).
+-- Roles: viewer (read-only) | analyst (triage) | admin (all + audit log view)
+CREATE TABLE IF NOT EXISTS audit_log (
+    id          SERIAL PRIMARY KEY,
+    alert_id    INTEGER REFERENCES alerts(id) ON DELETE CASCADE,
+    user_id     INTEGER REFERENCES users(id),
+    username    VARCHAR(64) NOT NULL,
+    action      VARCHAR(32) NOT NULL,   -- triage, escalate, reclassify, note_added
+    from_status VARCHAR(32),
+    to_status   VARCHAR(32),
+    note        TEXT,                   -- encrypted when DB_ENCRYPTION_KEY is set
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_audit_alert ON audit_log(alert_id);
+CREATE INDEX IF NOT EXISTS idx_audit_user  ON audit_log(user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_time  ON audit_log(created_at);

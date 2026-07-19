@@ -157,6 +157,81 @@ flowchart LR
 python -m pytest tests/ -v
 ```
 
+## Skills Demonstrated
+
+| Skill | Details |
+|---|---|
+| SOC Workflow | RBAC (viewer/analyst/admin), atomic audit trail with encrypted case notes, Server-Sent Events for live queue updates, quick filter presets |
+
+## Roles & Permissions
+
+SOC Dashboard has three roles, enforced server-side on every protected route:
+
+| Role | Permissions |
+|---|---|
+| **viewer** | Read-only: dashboard, alert queue, charts, KPIs. Cannot triage, escalate, or add notes. |
+| **analyst** | Everything viewer can do, plus: triage alerts (TP/FP/escalate), add case notes. |
+| **admin** | Everything analyst can do, plus: view and search the audit log, manage users. |
+
+Create accounts from the CLI:
+
+```bash
+python manage.py create-user alice 'passphrase' --role analyst
+python manage.py create-user bob   'passphrase' --role viewer
+python manage.py create-user carol 'passphrase' --role admin
+```
+
+Existing analyst and admin accounts continue to work identically — no migration required. Apply the new schema (which adds `audit_log`) with:
+
+```bash
+psql soc_dashboard -f schema.sql
+```
+
+## Audit Trail
+
+Every status change (triage, escalate, reclassify) and case note is recorded in the `audit_log` table **atomically** with the alert update — if the alert write fails, the audit row is rolled back too.
+
+**Case notes:**
+```bash
+curl -X POST http://localhost:8000/api/alerts/42/notes \
+  -H "Content-Type: application/json" \
+  -b "session=..." \
+  -d '{"note": "Confirmed C2 callback — escalating to IR."}'
+```
+
+**Audit history for an alert:**
+```
+GET /api/alerts/<id>/audit   →  JSON array of audit entries
+```
+
+**Full audit log** (admin only):
+```
+GET /audit   →  searchable, paginated HTML page
+```
+
+Note text is encrypted at rest with the same Fernet key as other PII fields (`DB_ENCRYPTION_KEY`).
+
+## Real-Time Updates
+
+The dashboard connects to a Server-Sent Events (SSE) stream at `GET /api/stream`. When a new alert is ingested or an alert's status changes, the queue table and KPI cards update live without a page refresh.
+
+The existing 30-second polling loop remains active as a fallback — SSE is the primary path; if the `EventSource` connection fails, polling keeps the queue current.
+
+**Limitation:** the in-process pub/sub only works within a single Gunicorn worker. For multi-worker production deployments, replace `_sse_publish`/`_sse_subscribe` with a Redis pub/sub adapter. The current implementation is correct and sufficient for single-worker or development deployments.
+
+## Saved Filter Views
+
+Quick-filter preset buttons above the alert queue let an analyst jump to common views in one click:
+
+| Preset | Shows |
+|---|---|
+| **My Queue** | Open alerts assigned to the current analyst (uses localStorage name) |
+| **Critical Today** | Open CRITICAL alerts created today (uses `created_after` param) |
+| **Escalated** | All alerts with status = escalated |
+| **All Open** | The default open queue |
+
+These presets combine with the existing severity/source/assignee filters. The underlying `/api/alerts` endpoint now accepts a `created_after` ISO datetime parameter alongside the existing filter params.
+
 ## ⚖️ Legal Notice & Responsible Use
 
 This project is **free and open-source software**, released under the **MIT License** as a

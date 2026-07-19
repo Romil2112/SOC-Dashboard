@@ -63,7 +63,7 @@ def main(argv=None):
     cu = sub.add_parser("create-user", help="Create an analyst/admin account")
     cu.add_argument("username")
     cu.add_argument("password")
-    cu.add_argument("--role", choices=["analyst", "admin"], default="analyst")
+    cu.add_argument("--role", choices=["viewer", "analyst", "admin"], default="analyst")
 
     args = parser.parse_args(argv)
     if args.command == "create-user":

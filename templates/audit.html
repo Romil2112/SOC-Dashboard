@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}SOC Dashboard — Audit Log{% endblock %}
+{% block nav_audit %}active{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+  <h5 class="text-light mb-0">Audit Log</h5>
+  <form class="d-flex gap-2" method="get" action="/audit">
+    <input type="text" name="q" value="{{ search }}"
+           class="form-control form-control-sm bg-dark text-light border-secondary"
+           style="width:220px" placeholder="Search username or action…">
+    <button type="submit" class="btn btn-sm btn-outline-secondary">Search</button>
+    {% if search %}
+    <a href="/audit" class="btn btn-sm btn-outline-secondary">Clear</a>
+    {% endif %}
+  </form>
+</div>
+
+{% if entries %}
+<div class="table-responsive">
+  <table class="table table-dark table-hover align-middle mb-0">
+    <thead>
+      <tr>
+        <th>Time</th>
+        <th>Alert #</th>
+        <th>Analyst</th>
+        <th>Action</th>
+        <th>From</th>
+        <th>To</th>
+        <th>Note</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for e in entries %}
+      <tr>
+        <td class="text-secondary small">{{ e.created_at }}</td>
+        <td>
+          {% if e.alert_id %}
+          <span class="text-info">#{{ e.alert_id }}</span>
+          {% else %}—{% endif %}
+        </td>
+        <td>{{ e.username }}</td>
+        <td><span class="badge text-bg-secondary">{{ e.action }}</span></td>
+        <td class="text-secondary small">{{ e.from_status or "—" }}</td>
+        <td class="text-secondary small">{{ e.to_status or "—" }}</td>
+        <td class="text-secondary small" style="max-width:300px;overflow-wrap:break-word;">
+          {{ e.note or "" }}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Pagination -->
+<nav class="mt-3" aria-label="Audit log pages">
+  <ul class="pagination pagination-sm justify-content-center">
+    {% if page > 1 %}
+    <li class="page-item">
+      <a class="page-link bg-dark text-light border-secondary"
+         href="/audit?page={{ page - 1 }}{% if search %}&q={{ search }}{% endif %}">Previous</a>
+    </li>
+    {% endif %}
+    <li class="page-item disabled">
+      <span class="page-link bg-dark text-secondary border-secondary">
+        Page {{ page }} of {{ ((total - 1) // per_page + 1) if total > 0 else 1 }} ({{ total }} entries)
+      </span>
+    </li>
+    {% if page * per_page < total %}
+    <li class="page-item">
+      <a class="page-link bg-dark text-light border-secondary"
+         href="/audit?page={{ page + 1 }}{% if search %}&q={{ search }}{% endif %}">Next</a>
+    </li>
+    {% endif %}
+  </ul>
+</nav>
+
+{% else %}
+<p class="text-secondary">No audit log entries found.</p>
+{% endif %}
+{% endblock %}
