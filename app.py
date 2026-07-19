@@ -1,5 +1,6 @@
 """SOC Analyst Dashboard — Flask + psycopg2 (no ORM)."""
 import hmac
+import json
 import os
 import queue
 import threading
@@ -777,15 +778,13 @@ def api_stream():
     only works within a single worker process. For multi-worker deployments,
     replace with Redis pub/sub.
     """
-    import json as _json
-
     def generate():
         q = _sse_subscribe()
         try:
             while True:
                 try:
                     event = q.get(timeout=30)
-                    yield f"data: {_json.dumps(event)}\n\n"
+                    yield f"data: {json.dumps(event)}\n\n"
                 except queue.Empty:
                     yield ": keepalive\n\n"
         except GeneratorExit:
