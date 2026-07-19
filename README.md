@@ -40,7 +40,7 @@ Security sits on a few specific choices. The ingest endpoint checks its API key 
 - Fernet field-level encryption at rest for `title`, `source_ip`, and `description`
 - Configurable retention purge (`ALERT_RETENTION_DAYS`)
 - 50 pre-seeded demo alerts across 5 categories, 4 severities, and 5 detection sources
-- 48 pytest tests at 95% line / 92% branch coverage, run against a real PostgreSQL
+- 75 pytest tests at 95% line / 92% branch coverage, run against a real PostgreSQL
 
 ## Running the Project
 
@@ -151,7 +151,7 @@ flowchart LR
 
 ## Tests
 
-48 pytest tests cover the ingest API, auth and CSRF, the classify/escalate flow, the KPI math (MTTR, SLA, escalation), the filter query params, encryption at rest, and the seed and user-management CLIs, at 95% line and 92% branch coverage. They run against a real PostgreSQL database through a Flask test client, both locally and on GitHub Actions with a Postgres service container. Point `DATABASE_URL` at a throwaway database and run:
+75 pytest tests cover the ingest API, auth and CSRF, RBAC roles, the classify/escalate flow, the KPI math (MTTR, SLA, escalation), the filter query params, encryption at rest, audit trail, SSE live updates, and the seed and user-management CLIs, at 95% line and 92% branch coverage. They run against a real PostgreSQL database through a Flask test client, both locally and on GitHub Actions with a Postgres service container. Point `DATABASE_URL` at a throwaway database and run:
 
 ```bash
 python -m pytest tests/ -v

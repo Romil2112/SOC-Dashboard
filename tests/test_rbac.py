@@ -340,6 +340,7 @@ def test_created_after_today_includes_just_created_alert():
 
 def test_manage_py_accepts_viewer_role():
     import argparse
+
     import manage  # noqa: F401 — ensure it's importable without connecting to DB
     p = argparse.ArgumentParser()
     p.add_argument("--role", choices=["viewer", "analyst", "admin"], default="analyst")
