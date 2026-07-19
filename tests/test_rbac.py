@@ -339,12 +339,8 @@ def test_created_after_today_includes_just_created_alert():
 # ── manage.py viewer role ─────────────────────────────────────────────────────
 
 def test_manage_py_accepts_viewer_role():
-    import manage
-    # Dry-run: parse the args without actually connecting to DB.
-    args = manage.main.__code__  # just ensure it's importable
-    # More directly: the argparse choices include 'viewer'.
-    parser_ns, _ = __import__("argparse").ArgumentParser().parse_known_args([])
     import argparse
+    import manage  # noqa: F401 — ensure it's importable without connecting to DB
     p = argparse.ArgumentParser()
     p.add_argument("--role", choices=["viewer", "analyst", "admin"], default="analyst")
     ns = p.parse_args(["--role", "viewer"])

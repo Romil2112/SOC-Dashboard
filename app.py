@@ -270,6 +270,10 @@ def alert_filters(extra=None):
     # created_after: ISO datetime string (additive param, no existing filter affected)
     created_after = (request.args.get("created_after") or "").strip()
     if created_after:
+        try:
+            datetime.fromisoformat(created_after.replace("Z", "+00:00"))
+        except ValueError:
+            abort(400, description="created_after must be an ISO 8601 datetime")
         where_sql.append("created_at >= %s")
         params.append(created_after)
     sql = (" WHERE " + " AND ".join(where_sql)) if where_sql else ""
