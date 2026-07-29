@@ -478,21 +478,12 @@ def _ingest_values(body, title, category, severity):
     )
 
 
-@app.route("/api/alerts", methods=["POST"])
-@csrf.exempt
-def api_ingest_alert():
-    """Ingest a new alert into the open queue.
+def _insert_alert(body: dict, title: str, category: str, severity: str) -> dict:
+    """Persist one alert to the DB, store its embedding, broadcast SSE, return the row.
 
-    This is the machine-to-machine entry point that lets an upstream detector
-    (e.g. log-analyzer) push real incidents into the dashboard. It is NOT behind
-    analyst login; instead it requires a valid X-API-Key header.
+    Called by both POST /api/alerts (after key check) and the Kafka consumer, so
+    the DB insert, encryption, embedding, and SSE logic live in exactly one place.
     """
-    if not _valid_api_key():
-        return jsonify({"error": "missing or invalid X-API-Key"}), 401
-
-    body = request.get_json(silent=True) or {}
-    title, category, severity = _parse_ingest_payload(body)
-
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             """
@@ -527,6 +518,39 @@ def api_ingest_alert():
         "severity": row["severity"],
         "status": row["status"],
     })
+    return row
+
+
+def _kafka_ingest(body: dict) -> None:
+    """Validate and store one Kafka-sourced alert body.
+
+    Raises ValueError on invalid payloads so the consumer can log and skip.
+    """
+    title    = (body.get("title") or "").strip()
+    category = (body.get("category") or "").strip()
+    severity = (body.get("severity") or "").strip().upper()
+    if not title or not category or severity not in SEVERITY_RANK:
+        raise ValueError(
+            f"invalid alert body: title={title!r} category={category!r} severity={severity!r}"
+        )
+    _insert_alert(body, title, category, severity)
+
+
+@app.route("/api/alerts", methods=["POST"])
+@csrf.exempt
+def api_ingest_alert():
+    """Ingest a new alert into the open queue.
+
+    This is the machine-to-machine entry point that lets an upstream detector
+    (e.g. log-analyzer) push real incidents into the dashboard. It is NOT behind
+    analyst login; instead it requires a valid X-API-Key header.
+    """
+    if not _valid_api_key():
+        return jsonify({"error": "missing or invalid X-API-Key"}), 401
+
+    body = request.get_json(silent=True) or {}
+    title, category, severity = _parse_ingest_payload(body)
+    row = _insert_alert(body, title, category, severity)
     return jsonify(row), 201
 
 
@@ -969,6 +993,20 @@ if ALERT_RETENTION_DAYS > 0:
               f"{ALERT_RETENTION_DAYS} day(s)")
     except Exception as exc:  # pragma: no cover - boot-time best effort
         print(f"[!] Retention purge skipped: {exc}")
+
+
+# Start the Kafka alert consumer when KAFKA_BROKER is configured.
+# Silently absent when the env var is unset — REST ingest continues unchanged.
+_KAFKA_BROKER = os.environ.get("KAFKA_BROKER")
+if _KAFKA_BROKER:
+    try:
+        from kafka.consumer import KafkaAlertConsumer as _KafkaAlertConsumer
+        _kafka_consumer = _KafkaAlertConsumer(_KAFKA_BROKER, ingest_fn=_kafka_ingest)
+        _kafka_consumer.start()
+        print(f"[+] Kafka consumer started (broker={_KAFKA_BROKER})")
+    except ImportError:
+        print("[!] confluent-kafka not installed; Kafka consumer not started "
+              "(pip install confluent-kafka)")
 
 
 if __name__ == "__main__":
