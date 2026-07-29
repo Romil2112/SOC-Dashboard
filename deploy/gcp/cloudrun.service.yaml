@@ -1,0 +1,47 @@
+# Apply with: gcloud run services replace deploy/gcp/cloudrun.service.yaml --region us-central1
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: soc-dashboard
+  annotations:
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "10"
+        run.googleapis.com/execution-environment: gen2
+        run.googleapis.com/cloudsql-instances: PROJECT_ID:us-central1:soc-dashboard-postgres
+    spec:
+      containers:
+        - image: us-central1-docker.pkg.dev/PROJECT_ID/soc-dashboard/app:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: PORT
+              value: "8000"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: soc-dashboard-database-url
+                  key: latest
+            - name: FLASK_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: soc-dashboard-flask-secret-key
+                  key: latest
+            - name: ALERTS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: soc-dashboard-alerts-api-key
+                  key: latest
+            - name: DB_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: soc-dashboard-db-encryption-key
+                  key: latest
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi
