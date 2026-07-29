@@ -10,3 +10,8 @@ venv/
 .coverage
 htmlcov/
 .pytest_cache/
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.backup
+*.tfvars
