@@ -36,6 +36,22 @@ from crypto import decrypt_field, encrypt_field, get_fernet
 
 load_dotenv()
 
+# --------------------------------------------------------------------------- #
+# Redis (optional) — SSE pub/sub and distributed state
+# --------------------------------------------------------------------------- #
+_REDIS_URL = os.environ.get("REDIS_URL")
+_REDIS_CLIENT = None
+_REDIS_SSE_CHANNEL = "soc:alerts"
+
+if _REDIS_URL:
+    try:
+        import redis as _redis_module
+        _REDIS_CLIENT = _redis_module.from_url(_REDIS_URL, socket_timeout=2)
+        print(f"[+] Redis SSE pub/sub enabled (url={_REDIS_URL})")
+    except ImportError:
+        print("[!] redis-py not installed; SSE falling back to in-process queue "
+              "(pip install redis)")
+
 DATABASE_URL = os.environ.get(
     "DATABASE_URL", "postgresql://localhost/soc_dashboard"
 )
@@ -124,13 +140,21 @@ def require_role(*roles):
 
 # --------------------------------------------------------------------------- #
 # In-process pub/sub for Server-Sent Events
+# (Redis pub/sub is used instead when _REDIS_CLIENT is set)
 # --------------------------------------------------------------------------- #
 _sse_subscribers: list = []
 _sse_lock = threading.Lock()
 
 
 def _sse_publish(event: dict) -> None:
-    """Broadcast an event dict to all SSE subscribers."""
+    """Broadcast an event dict to all SSE subscribers.
+
+    When Redis is configured, publishes to _REDIS_SSE_CHANNEL so every worker
+    process receives the event. Falls back to the in-process queue otherwise.
+    """
+    if _REDIS_CLIENT is not None:
+        _REDIS_CLIENT.publish(_REDIS_SSE_CHANNEL, json.dumps(event))
+        return
     with _sse_lock:
         dead = []
         for q in _sse_subscribers:
@@ -959,23 +983,42 @@ def api_navigator_layer():
 def api_stream():
     """SSE endpoint for live queue updates.
 
-    Publishes new_alert and status_change events. Uses an in-process Queue;
-    only works within a single worker process. For multi-worker deployments,
-    replace with Redis pub/sub.
+    When Redis is configured, subscribes to _REDIS_SSE_CHANNEL so events
+    published by any worker process reach every connected client. Falls back
+    to the in-process Queue for single-worker deployments.
     """
     def generate():
-        q = _sse_subscribe()
-        try:
-            while True:
+        if _REDIS_CLIENT is not None:
+            ps = _REDIS_CLIENT.pubsub()
+            ps.subscribe(_REDIS_SSE_CHANNEL)
+            try:
+                while True:
+                    msg = ps.get_message(ignore_subscribe_messages=True, timeout=30)
+                    if msg and msg["type"] == "message":
+                        yield f"data: {msg['data'].decode()}\n\n"
+                    else:
+                        yield ": keepalive\n\n"
+            except GeneratorExit:
+                pass
+            finally:
                 try:
-                    event = q.get(timeout=30)
-                    yield f"data: {json.dumps(event)}\n\n"
-                except queue.Empty:
-                    yield ": keepalive\n\n"
-        except GeneratorExit:
-            pass
-        finally:
-            _sse_unsubscribe(q)
+                    ps.unsubscribe(_REDIS_SSE_CHANNEL)
+                    ps.close()
+                except Exception:
+                    pass
+        else:
+            q = _sse_subscribe()
+            try:
+                while True:
+                    try:
+                        event = q.get(timeout=30)
+                        yield f"data: {json.dumps(event)}\n\n"
+                    except queue.Empty:
+                        yield ": keepalive\n\n"
+            except GeneratorExit:
+                pass
+            finally:
+                _sse_unsubscribe(q)
 
     return Response(
         generate(),

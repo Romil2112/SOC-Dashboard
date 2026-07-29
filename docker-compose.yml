@@ -43,18 +43,31 @@ services:
       retries: 12
       start_period: 15s
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   web:
     build: .
     environment:
       DATABASE_URL: postgresql://soc:soc@db:5432/soc_dashboard
       PORT: "8000"
       KAFKA_BROKER: kafka:9092
+      REDIS_URL: redis://redis:6379
     ports:
       - "8000:8000"
     depends_on:
       db:
         condition: service_healthy
       kafka:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     # Seed once the DB is ready, then launch gunicorn.
     command: >
