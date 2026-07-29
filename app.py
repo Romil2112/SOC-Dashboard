@@ -79,6 +79,33 @@ print(
 )
 
 # --------------------------------------------------------------------------- #
+# Semantic embedding (fastembed + pgvector)
+# --------------------------------------------------------------------------- #
+_EMBEDDING_MODEL = None
+
+
+def _get_embedding_model():
+    """Load fastembed TextEmbedding on first call; return None if unavailable."""
+    global _EMBEDDING_MODEL
+    if _EMBEDDING_MODEL is None:
+        try:
+            from fastembed import TextEmbedding
+            _EMBEDDING_MODEL = TextEmbedding("BAAI/bge-small-en-v1.5")
+        except Exception:
+            pass
+    return _EMBEDDING_MODEL
+
+
+def _embed_text(text):
+    """Return a pgvector literal string for text, or None if model is unavailable."""
+    model = _get_embedding_model()
+    if model is None:
+        return None
+    vec = next(model.embed([text]))
+    return "[" + ",".join(f"{x:.6f}" for x in vec) + "]"
+
+
+# --------------------------------------------------------------------------- #
 # Role-based access control
 # --------------------------------------------------------------------------- #
 def require_role(*roles):
@@ -461,6 +488,21 @@ def api_ingest_alert():
         )
         created = cur.fetchone()
 
+    # Store semantic embedding (best-effort — ingest succeeds even without pgvector)
+    embed_text = " ".join(filter(None, [title, body.get("description"), category]))
+    vec_str = _embed_text(embed_text)
+    if vec_str:
+        try:
+            with get_conn() as conn, conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO alert_embeddings (alert_id, embedding) "
+                    "VALUES (%s, %s::vector) "
+                    "ON CONFLICT (alert_id) DO UPDATE SET embedding = EXCLUDED.embedding",
+                    (created["id"], vec_str),
+                )
+        except Exception:
+            pass
+
     row = serialize(decrypt_alert(dict(created)))
     _sse_publish({
         "type": "new_alert",
@@ -469,6 +511,42 @@ def api_ingest_alert():
         "status": row["status"],
     })
     return jsonify(row), 201
+
+
+@app.route("/api/alerts/<int:alert_id>/similar")
+@login_required
+def api_similar_alerts(alert_id):
+    """Return the top-5 alerts most semantically similar to alert_id by cosine distance."""
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT a.id, a.title, a.category, a.severity, a.status, a.created_at,
+                       round((1 - (ref.embedding <=> cmp.embedding))::numeric, 3) AS similarity
+                FROM   alert_embeddings ref
+                JOIN   alert_embeddings cmp ON cmp.alert_id != ref.alert_id
+                JOIN   alerts           a   ON a.id = cmp.alert_id
+                WHERE  ref.alert_id = %s
+                ORDER  BY ref.embedding <=> cmp.embedding
+                LIMIT  5
+                """,
+                (alert_id,),
+            )
+            rows = cur.fetchall()
+    except Exception:
+        return jsonify([])
+    return jsonify([
+        {
+            "id":         r["id"],
+            "title":      decrypt_field(FERNET, r["title"]),
+            "category":   r["category"],
+            "severity":   r["severity"],
+            "status":     r["status"],
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            "similarity": float(r["similarity"]),
+        }
+        for r in rows
+    ])
 
 
 @app.route("/api/alerts/<int:alert_id>/classify", methods=["POST"])

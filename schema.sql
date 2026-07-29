@@ -1,5 +1,11 @@
 -- SOC Analyst Dashboard schema
 -- Drop existing objects so the schema can be re-applied cleanly.
+DO $$ BEGIN
+  CREATE EXTENSION IF NOT EXISTS vector;
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+DROP TABLE IF EXISTS alert_embeddings CASCADE;
 DROP TABLE IF EXISTS analyst_actions CASCADE;
 DROP TABLE IF EXISTS alerts CASCADE;
 DROP TABLE IF EXISTS users CASCADE;
@@ -76,3 +82,15 @@ CREATE TABLE IF NOT EXISTS audit_log (
 CREATE INDEX IF NOT EXISTS idx_audit_alert ON audit_log(alert_id);
 CREATE INDEX IF NOT EXISTS idx_audit_user  ON audit_log(user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_time  ON audit_log(created_at);
+
+-- Semantic alert embeddings for similarity search (requires pgvector extension).
+-- Wrapped in a DO block so the schema applies cleanly on plain postgres instances.
+DO $$ BEGIN
+  CREATE TABLE IF NOT EXISTS alert_embeddings (
+      alert_id  INTEGER PRIMARY KEY REFERENCES alerts(id) ON DELETE CASCADE,
+      embedding vector(384)
+  );
+  CREATE INDEX IF NOT EXISTS idx_alert_embedding ON alert_embeddings
+      USING ivfflat (embedding vector_cosine_ops) WITH (lists = 50);
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;

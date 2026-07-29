@@ -151,6 +151,16 @@
     </div>
   </div>
 </div>
+
+<!-- Similar Alerts panel — populated and revealed by showSimilar() in dashboard.js -->
+<div id="similar-panel" class="card bg-dark border-info text-light mt-3 d-none">
+  <div class="card-header d-flex justify-content-between align-items-center py-2">
+    <span class="fw-semibold small text-info" id="similar-panel-heading">Similar Alerts</span>
+    <button type="button" class="btn-close btn-close-white btn-sm"
+            onclick="document.getElementById('similar-panel').classList.add('d-none')"></button>
+  </div>
+  <div class="card-body py-2" id="similar-panel-body"></div>
+</div>
 {% endblock %}
 
 {% block scripts %}

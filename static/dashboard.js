@@ -190,6 +190,7 @@ async function loadAlerts() {
              <button class="btn btn-sm btn-outline-secondary" onclick="classifyAlert(${a.id}, 'classify_fp')">FP</button>
              <button class="btn btn-sm btn-outline-danger"   onclick="classifyAlert(${a.id}, 'escalate')">Escalate</button>`
         }
+        <button class="btn btn-sm btn-outline-info ms-1" onclick="showSimilar(${a.id})">Similar</button>
       </td>
     </tr>`).join("");
 }
@@ -215,6 +216,42 @@ async function classifyAlert(id, action) {
   }
   // Refresh queue + stats immediately.
   await refreshAll();
+}
+
+async function showSimilar(alertId) {
+  const panel = document.getElementById("similar-panel");
+  const heading = document.getElementById("similar-panel-heading");
+  const body = document.getElementById("similar-panel-body");
+  if (!panel) return;
+  heading.textContent = `Semantically Similar to Alert #${alertId}`;
+  body.innerHTML = '<p class="text-secondary mb-0">Loading…</p>';
+  panel.classList.remove("d-none");
+  panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  try {
+    const res = await fetch(`/api/alerts/${alertId}/similar`);
+    const rows = await res.json();
+    if (!rows.length) {
+      body.innerHTML = '<p class="text-secondary mb-0">No similar alerts found — embeddings are generated on ingest and may not yet be available for this alert.</p>';
+      return;
+    }
+    body.innerHTML = `<table class="table table-sm table-dark mb-0">
+      <thead><tr>
+        <th>Severity</th><th>Title</th><th>Category</th>
+        <th>Status</th><th class="text-end">Similarity</th>
+      </tr></thead>
+      <tbody>${rows.map(r => `
+        <tr>
+          <td><span class="badge ${SEVERITY_BADGE[r.severity] || "text-bg-secondary"}">${escapeHtml(r.severity)}</span></td>
+          <td>${escapeHtml(r.title)}</td>
+          <td>${escapeHtml((r.category || "").replace("_", " "))}</td>
+          <td>${escapeHtml(r.status)}</td>
+          <td class="text-end"><code>${(r.similarity * 100).toFixed(1)}%</code></td>
+        </tr>`).join("")}
+      </tbody>
+    </table>`;
+  } catch (e) {
+    body.innerHTML = '<p class="text-danger mb-0">Failed to load similar alerts.</p>';
+  }
 }
 
 // ----- stats (KPI cards, global / unfiltered) ------------------------------ //
