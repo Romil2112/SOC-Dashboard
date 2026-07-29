@@ -187,6 +187,23 @@ def load_user(user_id):
 # Severity ordering used for queue sorting (CRITICAL first).
 SEVERITY_RANK = {"CRITICAL": 1, "HIGH": 2, "MEDIUM": 3, "LOW": 4}
 
+# ATT&CK Navigator: map SOC alert categories to MITRE technique IDs.
+_CATEGORY_MITRE: dict[str, str] = {
+    "brute_force": "T1110.001",
+    "port_scan":   "T1046",
+    "malware":     "T1059",
+    "phishing":    "T1566",
+    "anomaly":     "T1078",
+}
+
+# Score used in the Navigator layer; higher severity → higher heat.
+_NAVIGATOR_SCORE: dict[str, int] = {
+    "CRITICAL": 100,
+    "HIGH":      75,
+    "MEDIUM":    50,
+    "LOW":       25,
+}
+
 # Map a classify action to the resulting alert status.
 ACTION_TO_STATUS = {
     "classify_tp": "true_positive",
@@ -846,6 +863,68 @@ def api_add_note(alert_id):
         row = cur.fetchone()
 
     return jsonify({"id": row["id"], "created_at": row["created_at"].isoformat()}), 201
+
+
+# --------------------------------------------------------------------------- #
+# ATT&CK Navigator layer export
+# --------------------------------------------------------------------------- #
+@app.route("/api/navigator-layer")
+@login_required
+def api_navigator_layer():
+    """Return the current alert corpus as an ATT&CK Navigator 4.9 layer JSON.
+
+    Groups alerts by category → MITRE technique, scoring each entry by the
+    highest observed severity. The JSON can be imported directly at
+    https://mitre-attack.github.io/attack-navigator/.
+    """
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT category, severity, count(*) AS c "
+            "FROM alerts GROUP BY category, severity"
+        )
+        rows = cur.fetchall()
+
+    techniques: dict[str, dict] = {}
+    total = 0
+    for row in rows:
+        cat   = row["category"]
+        sev   = row["severity"]
+        count = row["c"]
+        total += count
+        tid   = _CATEGORY_MITRE.get(cat)
+        if not tid:
+            continue
+        score = _NAVIGATOR_SCORE.get(sev, 25)
+        if tid not in techniques or score > techniques[tid]["score"]:
+            techniques[tid] = {
+                "techniqueID": tid,
+                "score":       score,
+                "color":       "",
+                "comment":     f"{cat}: {count} alert(s), {sev}",
+                "enabled":     True,
+            }
+
+    layer = {
+        "name": "SOC Dashboard Alert Coverage",
+        "versions": {"attack": "14", "navigator": "4.9", "layer": "4.5"},
+        "domain": "enterprise-attack",
+        "description": f"ATT&CK coverage derived from {total} SOC alert(s).",
+        "techniques": list(techniques.values()),
+        "gradient": {
+            "colors":   ["#ffd700", "#ff6600", "#cc0000"],
+            "minValue": 0,
+            "maxValue": 100,
+        },
+        "legendItems": [
+            {"label": "CRITICAL (100)", "color": "#cc0000"},
+            {"label": "HIGH (75)",      "color": "#ff6600"},
+            {"label": "MEDIUM (50)",    "color": "#ffd700"},
+            {"label": "LOW (25)",       "color": "#33cc66"},
+        ],
+        "showTacticRowBackground":      False,
+        "selectTechniquesAcrossTactics": True,
+    }
+    return jsonify(layer)
 
 
 # --------------------------------------------------------------------------- #

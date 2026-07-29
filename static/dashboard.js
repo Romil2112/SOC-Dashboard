@@ -407,6 +407,20 @@ function initSSE() {
   };
 }
 
+// ----- ATT&CK Navigator export --------------------------------------------- //
+function downloadNavigatorLayer() {
+  fetch("/api/navigator-layer")
+    .then(r => r.blob())
+    .then(blob => {
+      const url = URL.createObjectURL(blob);
+      const a   = document.createElement("a");
+      a.href     = url;
+      a.download = "navigator_layer.json";
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+}
+
 // ----- boot ---------------------------------------------------------------- //
 document.addEventListener("DOMContentLoaded", () => {
   initAnalystInput();
