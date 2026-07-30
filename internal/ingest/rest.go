@@ -11,14 +11,21 @@ import (
 // Go ingest service. All other paths return 404. The handler is intentionally
 // minimal: routing, TLS, and keep-alive tuning belong at the infrastructure
 // layer (nginx, cloud load balancer), not here.
+//
+// Method-prefix patterns in http.ServeMux require Go 1.22+; we target Go 1.21
+// so the method check is done explicitly inside the handler.
 func NewRESTHandler(svc *Service) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/alerts", makeIngestHandler(svc))
+	mux.HandleFunc("/api/alerts", makeIngestHandler(svc))
 	return mux
 }
 
 func makeIngestHandler(svc *Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
 		if !svc.ValidateAPIKey(r.Header.Get("X-Api-Key")) {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "missing or invalid X-API-Key"})
 			return

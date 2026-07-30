@@ -1,7 +1,8 @@
 package ingest
 
 import (
-	"strings"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -174,10 +175,11 @@ func (e fakeError) Error() string { return string(e) }
 // --- REST handler (unit, no DB) ---
 
 func TestRESTHandlerRejectsGetMethod(t *testing.T) {
-	// Ensure the pattern "POST /api/alerts" does not match GET.
-	// (A proper HTTP handler test requires httptest; checked via routing pattern.)
-	pattern := "POST /api/alerts"
-	if !strings.HasPrefix(pattern, "POST") {
-		t.Fatal("handler must be registered as POST only")
+	handler := NewRESTHandler(&Service{apiKey: "key"})
+	req := httptest.NewRequest(http.MethodGet, "/api/alerts", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("GET /api/alerts: want 405, got %d", rr.Code)
 	}
 }

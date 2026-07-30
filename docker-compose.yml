@@ -60,6 +60,7 @@ services:
       PORT: "8000"
       KAFKA_BROKER: kafka:9092
       REDIS_URL: redis://redis:6379
+      DB_ENCRYPTION_KEY: ${DB_ENCRYPTION_KEY:-}
     ports:
       - "8000:8000"
     depends_on:
