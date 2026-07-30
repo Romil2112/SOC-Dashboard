@@ -15,35 +15,6 @@ import (
 	"github.com/Romil2112/SOC-Dashboard/internal/ingestpb"
 )
 
-// grpcMetadataCarrier adapts gRPC metadata to the OTel TextMapCarrier interface.
-// Kept for potential future use (e.g. tracestate propagation). Active trace context
-// extraction uses extractRemoteSpanContext directly to bypass Go OTel v1.28.0's
-// strict flags validation (rejects SAMPLED|RANDOM_TRACE_ID = 0x03 from Python ≥1.44).
-
-// grpcMetadataCarrier adapts gRPC metadata to the OTel TextMapCarrier interface
-// so W3C TraceContext headers injected by the Python client propagate correctly.
-type grpcMetadataCarrier metadata.MD
-
-func (c grpcMetadataCarrier) Get(key string) string {
-	vals := metadata.MD(c).Get(key)
-	if len(vals) == 0 {
-		return ""
-	}
-	return vals[0]
-}
-
-func (c grpcMetadataCarrier) Set(key, value string) {
-	metadata.MD(c).Set(key, value)
-}
-
-func (c grpcMetadataCarrier) Keys() []string {
-	out := make([]string, 0, len(c))
-	for k := range c {
-		out = append(out, k)
-	}
-	return out
-}
-
 // GRPCServer implements ingestpb.AlertIngestServiceServer.
 type GRPCServer struct {
 	ingestpb.UnimplementedAlertIngestServiceServer
