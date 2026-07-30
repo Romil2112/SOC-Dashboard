@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package soc.ingest.v1;
+
+option go_package = "github.com/Romil2112/SOC-Dashboard/internal/ingestpb";
+
+// AlertIngestService is the high-throughput write path for pushing security
+// alerts into the SOC Dashboard. Both REST (port 8001) and gRPC (port 9001)
+// transports are served by the same underlying service implementation.
+service AlertIngestService {
+  rpc IngestAlert(IngestAlertRequest) returns (IngestAlertResponse);
+}
+
+message IngestAlertRequest {
+  string title           = 1; // required
+  string category        = 2; // required: brute_force | port_scan | phishing | malware | anomaly
+  string severity        = 3; // required: CRITICAL | HIGH | MEDIUM | LOW
+  string source          = 4; // optional: detecting sensor or tool name
+  string source_ip       = 5; // optional: attacker IP (encrypted at rest)
+  string description     = 6; // optional: human-readable detail (encrypted at rest)
+  string workflow_run_id = 7; // optional: Orkes Conductor run provenance
+  string run_metadata    = 8; // optional: JSON task-timing blob from Conductor
+}
+
+message IngestAlertResponse {
+  int64  id         = 1;
+  string severity   = 2;
+  string status     = 3;
+  string created_at = 4; // RFC 3339
+}

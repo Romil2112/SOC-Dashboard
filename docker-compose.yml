@@ -74,5 +74,23 @@ services:
       sh -c "python seed.py &&
              gunicorn --bind 0.0.0.0:8000 --workers 3 app:app"
 
+  ingest-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.ingest-service
+    environment:
+      DATABASE_URL: postgresql://soc:soc@db:5432/soc_dashboard
+      REDIS_URL: redis://redis:6379
+      ALERTS_API_KEY: ${ALERTS_API_KEY}
+      DB_ENCRYPTION_KEY: ${DB_ENCRYPTION_KEY:-}
+    ports:
+      - "8001:8001"
+      - "9001:9001"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
 volumes:
   pgdata:
