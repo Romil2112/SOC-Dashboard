@@ -5,6 +5,9 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 )
 
 // NewRESTHandler returns an http.Handler that exposes POST /api/alerts on the
@@ -21,7 +24,13 @@ func NewRESTHandler(svc *Service) http.Handler {
 }
 
 func makeIngestHandler(svc *Service) http.HandlerFunc {
+	tracer := otel.Tracer("soc-ingest")
 	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := otel.GetTextMapPropagator().Extract(r.Context(), propagation.HeaderCarrier(r.Header))
+		ctx, span := tracer.Start(ctx, "soc_ingest.rest_ingest")
+		defer span.End()
+		r = r.WithContext(ctx)
+
 		if r.Method != http.MethodPost {
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 			return

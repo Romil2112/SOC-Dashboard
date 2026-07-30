@@ -30,6 +30,9 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	shutdownTracer := initTracer(ctx)
+	defer shutdownTracer(context.Background())
+
 	svc, err := ingest.NewService(ctx, cfg)
 	if err != nil {
 		slog.Error("failed to initialise ingest service", "err", err)
