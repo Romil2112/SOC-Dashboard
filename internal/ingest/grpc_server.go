@@ -15,6 +15,11 @@ import (
 	"github.com/Romil2112/SOC-Dashboard/internal/ingestpb"
 )
 
+// grpcMetadataCarrier adapts gRPC metadata to the OTel TextMapCarrier interface.
+// Kept for potential future use (e.g. tracestate propagation). Active trace context
+// extraction uses extractRemoteSpanContext directly to bypass Go OTel v1.28.0's
+// strict flags validation (rejects SAMPLED|RANDOM_TRACE_ID = 0x03 from Python ≥1.44).
+
 // grpcMetadataCarrier adapts gRPC metadata to the OTel TextMapCarrier interface
 // so W3C TraceContext headers injected by the Python client propagate correctly.
 type grpcMetadataCarrier metadata.MD
@@ -56,7 +61,9 @@ func NewGRPCServer(svc *Service) *grpc.Server {
 // IngestAlert implements the gRPC unary RPC.
 func (g *GRPCServer) IngestAlert(ctx context.Context, req *ingestpb.IngestAlertRequest) (*ingestpb.IngestAlertResponse, error) {
 	if md, ok := metadata.FromIncomingContext(ctx); ok {
-		ctx = otel.GetTextMapPropagator().Extract(ctx, grpcMetadataCarrier(md))
+		if vals := md.Get("traceparent"); len(vals) > 0 {
+			ctx = extractRemoteSpanContext(ctx, vals[0])
+		}
 	}
 	tracer := otel.Tracer("soc-ingest")
 	ctx, span := tracer.Start(ctx, "soc_ingest.grpc_ingest")
