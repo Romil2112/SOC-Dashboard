@@ -144,7 +144,7 @@ Copy `.env.example` to `.env` and fill these in. The two required ones make the 
 
 ## Architecture diagram
 
-Two ways alerts arrive, one queue they land in. A detector (log-analyzer, or any tool) pushes alerts over the API-key-protected ingest endpoint; analysts sign in, work the queue, and classify each alert, which records an action and its response time. Everything reads and writes one PostgreSQL database, and the stats endpoint aggregates it into the charts and the SLA/MTTR numbers on the dashboard.
+Three ingest paths, one queue. Detectors push alerts via the Flask REST endpoint, the Go gRPC microservice, or the Kafka consumer — all three converge in PostgreSQL. Analysts sign in, work the queue, and classify each alert, which records an action and its response time. The stats endpoint aggregates everything into the charts and the SLA/MTTR numbers on the dashboard.
 
 ```mermaid
 flowchart LR
