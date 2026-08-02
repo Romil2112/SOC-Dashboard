@@ -22,7 +22,7 @@ Dashboard walkthrough — KPI cards, alert queue with one-click triage, and anal
 
 ## How it works
 
-Alerts reach the dashboard two ways and both land in one queue. A detector POSTs to the ingest endpoint with an API key; analysts sign in and work the queue in the browser. Every read and write goes through one PostgreSQL database holding three tables (alerts, analyst_actions, users), and `/api/stats` aggregates that into the charts and the SLA and MTTR numbers.
+Alerts reach the dashboard three ways and all land in one queue: a detector POSTs to the Flask REST endpoint, sends a gRPC call to the Go ingest microservice, or publishes to the Kafka topic the Go service consumes. Analysts sign in and work the queue in the browser. Every read and write goes through one PostgreSQL database holding three tables (alerts, analyst_actions, users), and `/api/stats` aggregates that into the charts and the SLA and MTTR numbers.
 
 Security sits on a few specific choices. The ingest endpoint checks its API key with a constant-time comparison, so response timing does not reveal how much of the key was right. Analyst passwords are stored as bcrypt hashes and there is no self-registration: accounts are created from the CLI. Session routes sit behind CSRF protection, while the machine-to-machine ingest route is exempt because it authenticates by key rather than by cookie. Errors return JSON with a fixed message and no stack trace, so a failed request does not leak internal file paths.
 
