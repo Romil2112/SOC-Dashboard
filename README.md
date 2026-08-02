@@ -37,10 +37,16 @@ Security sits on a few specific choices. The ingest endpoint checks its API key 
 - SOC KPIs: MTTR per analyst, SLA-breach rate per severity target, escalation rate
 - Live filters by severity, detection source, and assignee that drive both the queue and the charts
 - Chart.js views: alerts by category, by severity, by source, and a 7-day MTTR trend
-- Fernet field-level encryption at rest for `title`, `source_ip`, and `description`
+- Fernet field-level encryption at rest for `title`, `source_ip`, `description`, and audit case notes
 - Configurable retention purge (`ALERT_RETENTION_DAYS`)
 - 50 pre-seeded demo alerts across 5 categories, 4 severities, and 5 detection sources
-- 75 pytest tests at 95% line / 92% branch coverage, run against a real PostgreSQL
+- **Go ingest microservice** — independent binary exposing both a REST endpoint and a gRPC endpoint (`AlertIngestService`), with OTel distributed tracing that bridges Python OTel ≥ 1.44 `flags=03` traceparents the standard Go SDK would otherwise reject
+- **Kafka consumer** — reads alerts from a Kafka topic and routes them through the same ingest pipeline; starts automatically when `KAFKA_BROKER` is set
+- **Redis pub/sub** — SSE live-update events are broadcast over Redis so every Gunicorn worker forwards queue changes to its connected analysts; falls back to in-process queue when `REDIS_URL` is unset
+- **pgvector semantic similarity** — `POST /api/alerts` stores a fastembed embedding; `GET /api/alerts/<id>/similar` returns the top 5 by cosine distance
+- **Kubernetes manifests** — `deploy/k8s/` covers Deployment, HPA, Ingress, and Namespace with a separate `Dockerfile.ingest-service` for the Go binary
+- **GCP deployment** — `deploy/gcp/` (Cloud Run service YAML + Cloud Build pipeline) and `terraform/gcp/` provision the full stack
+- 116 pytest + 87 Go = **203 tests** covering the ingest API, auth/CSRF, RBAC, KPI math, encryption, audit trail, Kafka consumer, Redis SSE, pgvector similarity, and the full Go ingest handler and gRPC interceptor surface
 
 ## Running the Project
 
@@ -109,9 +115,11 @@ The `docker-compose.yml` starts PostgreSQL, runs the schema migration, and start
 | GET | `/analyst` | Analyst performance page |
 | GET | `/api/alerts` | Open alerts sorted by severity. Filterable: `?severity=&source=&assigned_to=` |
 | GET | `/api/alerts/all` | All alerts. Same filter query params as above |
-| POST | `/api/alerts` | **Ingest** a new alert `{title, category, severity, source?, source_ip?, description?}` → 201 |
+| POST | `/api/alerts` | **Ingest** a new alert `{title, category, severity, source?, source_ip?, description?, workflow_run_id?, run_metadata?}` → 201 |
 | POST | `/api/alerts/<id>/classify` | Classify alert `{analyst, action}` |
+| GET | `/api/alerts/<id>/similar` | Top-5 semantically similar alerts by cosine distance (pgvector) |
 | GET | `/api/stats` | Summary counts + `by_category` / `by_severity` / `by_source` + `escalation` + `sla` + MTTR by analyst + `assignees` |
+| gRPC | `AlertIngestService/IngestAlert` | Same ingest contract as REST, served by the Go microservice on `:9001` |
 
 `action` is one of `classify_tp` (→ `true_positive`), `classify_fp` (→ `false_positive`),
 or `escalate` (→ `escalated`). Filter query params are validated against a column
@@ -130,6 +138,9 @@ Copy `.env.example` to `.env` and fill these in. The two required ones make the 
 | `ALERT_RETENTION_DAYS` | — | `0` (keep forever) | Purge alerts older than N days at startup |
 | `FLASK_DEBUG` | — | off | Set `1`/`true` for the Werkzeug debugger (local dev only) |
 | `HOST` / `PORT` | — | `127.0.0.1` / `8000` | Bind address and port for `python app.py` |
+| `REDIS_URL` | — | unset | Redis connection string; enables multi-worker SSE pub/sub |
+| `KAFKA_BROKER` | — | unset | Bootstrap servers; starts the Kafka consumer when set |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | — | unset | OTLP endpoint for Go ingest service distributed tracing |
 
 ## Architecture diagram
 
@@ -137,21 +148,27 @@ Two ways alerts arrive, one queue they land in. A detector (log-analyzer, or any
 
 ```mermaid
 flowchart LR
-    D[Detector<br/>e.g. log-analyzer] -->|POST /api/alerts<br/>X-API-Key| ING[Ingest]
-    A[Analyst<br/>browser] -->|login session| WEB[Dashboard + queue]
-    ING --> DB[(PostgreSQL<br/>alerts · analyst_actions · users)]
-    WEB -->|classify / escalate| DB
+    LA[log-analyzer] -->|gRPC IngestAlert<br/>X-API-Key| GO[Go ingest service<br/>REST :8001 · gRPC :9001]
+    LA -->|POST /api/alerts<br/>X-API-Key| FLASK[Flask app :8000]
+    KAF[Kafka topic] --> GO
+    GO --> DB[(PostgreSQL<br/>alerts · analyst_actions · users<br/>pgvector embeddings)]
+    FLASK --> DB
+    A[Analyst browser] -->|login session| FLASK
+    FLASK -->|classify / escalate| DB
     DB --> STATS[/api/stats<br/>counts · MTTR · SLA · escalation]
     STATS --> CHARTS[Chart.js dashboard]
+    FLASK <-->|SSE pub/sub| REDIS[(Redis)]
+    GO -->|OTel traces| OTEL[OTLP collector]
     subgraph Security
         CSRF[CSRF on session routes]
         ENC[Fernet field encryption at rest]
+        CTC[Constant-time API-key check]
     end
 ```
 
 ## Tests
 
-75 pytest tests cover the ingest API, auth and CSRF, RBAC roles, the classify/escalate flow, the KPI math (MTTR, SLA, escalation), the filter query params, encryption at rest, audit trail, SSE live updates, and the seed and user-management CLIs, at 95% line and 92% branch coverage. They run against a real PostgreSQL database through a Flask test client, both locally and on GitHub Actions with a Postgres service container. Point `DATABASE_URL` at a throwaway database and run:
+**116 pytest + 87 Go = 203 tests.** The Python suite covers the ingest API, auth/CSRF, RBAC roles, the classify/escalate flow, KPI math (MTTR, SLA, escalation), filter query params, Fernet encryption at rest, audit trail, SSE live updates, Kafka consumer, Redis pub/sub, pgvector semantic similarity, and the seed and user-management CLIs. The Go suite tests the REST and gRPC ingest handlers, `apiKeyInterceptor` boundary conditions (empty key, no metadata, constant-time comparison, whitespace trimming), W3C traceparent parsing edge cases (Python OTel ≥ 1.44 `flags=03`, zero IDs, extra segments, invalid hex), and proto field mapping (`SourceIp→SourceIP`, `WorkflowRunId→WorkflowRunID`). Both suites run against a real PostgreSQL database (Docker on port 5433 for CI). Point `DATABASE_URL` at a throwaway database and run:
 
 ```bash
 python -m pytest tests/ -v
@@ -162,6 +179,12 @@ python -m pytest tests/ -v
 | Skill | Details |
 |---|---|
 | SOC Workflow | RBAC (viewer/analyst/admin), atomic audit trail with encrypted case notes, Server-Sent Events for live queue updates, quick filter presets |
+| Multi-protocol ingest | Go microservice serving both REST (`:8001`) and gRPC (`AlertIngestService`, `:9001`) behind a constant-time `X-API-Key` interceptor; Kafka consumer routes topic messages through the same pipeline |
+| Distributed tracing | OTel OTLP export in Go ingest service; custom W3C traceparent parser accepts Python OTel ≥ 1.44 `flags=03` that the standard Go SDK rejects |
+| Semantic search | fastembed embeddings stored in pgvector; `GET /api/alerts/<id>/similar` returns top-5 by cosine distance |
+| Horizontal scaling | Redis pub/sub for multi-worker SSE; K8s HPA manifest scales ingest replicas on CPU/RPS |
+| Cloud deployment | Cloud Run + Cloud Build (`deploy/gcp/`); Terraform provisions GCP infra (`terraform/gcp/`) |
+| Test engineering | 203 tests (116 Python + 87 Go) exercising boundary conditions, constant-time comparisons, W3C traceparent edge cases, and proto field mapping without a live database |
 
 ## Roles & Permissions
 
@@ -217,7 +240,7 @@ The dashboard connects to a Server-Sent Events (SSE) stream at `GET /api/stream`
 
 The existing 30-second polling loop remains active as a fallback — SSE is the primary path; if the `EventSource` connection fails, polling keeps the queue current.
 
-**Limitation:** the in-process pub/sub only works within a single Gunicorn worker. For multi-worker production deployments, replace `_sse_publish`/`_sse_subscribe` with a Redis pub/sub adapter. The current implementation is correct and sufficient for single-worker or development deployments.
+When `REDIS_URL` is set the app publishes events over Redis pub/sub, so every Gunicorn worker receives and forwards queue changes to its connected analysts. Without `REDIS_URL` it falls back to an in-process queue (correct for single-worker or local dev).
 
 ## Saved Filter Views
 
