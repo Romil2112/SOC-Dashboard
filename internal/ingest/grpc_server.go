@@ -18,13 +18,14 @@ import (
 // GRPCServer implements ingestpb.AlertIngestServiceServer.
 type GRPCServer struct {
 	ingestpb.UnimplementedAlertIngestServiceServer
-	svc *Service
+	svc Servicer
 }
 
 // NewGRPCServer returns a configured gRPC server with the API-key interceptor
-// and the AlertIngestService registered.
-func NewGRPCServer(svc *Service) *grpc.Server {
-	srv := grpc.NewServer(grpc.UnaryInterceptor(apiKeyInterceptor(svc.apiKey)))
+// and the AlertIngestService registered. apiKey is passed separately because
+// Servicer does not expose internal configuration fields.
+func NewGRPCServer(svc Servicer, apiKey string) *grpc.Server {
+	srv := grpc.NewServer(grpc.UnaryInterceptor(apiKeyInterceptor(apiKey)))
 	ingestpb.RegisterAlertIngestServiceServer(srv, &GRPCServer{svc: svc})
 	return srv
 }

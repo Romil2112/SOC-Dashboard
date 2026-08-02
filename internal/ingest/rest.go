@@ -16,13 +16,13 @@ import (
 //
 // Method-prefix patterns in http.ServeMux require Go 1.22+; we target Go 1.21
 // so the method check is done explicitly inside the handler.
-func NewRESTHandler(svc *Service) http.Handler {
+func NewRESTHandler(svc Servicer) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/alerts", makeIngestHandler(svc))
 	return mux
 }
 
-func makeIngestHandler(svc *Service) http.HandlerFunc {
+func makeIngestHandler(svc Servicer) http.HandlerFunc {
 	tracer := otel.Tracer("soc-ingest")
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := extractRemoteSpanContext(r.Context(), r.Header.Get("Traceparent"))

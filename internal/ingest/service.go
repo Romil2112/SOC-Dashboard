@@ -65,6 +65,13 @@ type Config struct {
 	GRPCAddr         string
 }
 
+// Servicer is the interface consumed by the REST and gRPC transports. It is
+// satisfied by *Service and enables unit testing without a live database.
+type Servicer interface {
+	ValidateAPIKey(key string) bool
+	Ingest(ctx context.Context, req AlertRequest) (AlertResponse, error)
+}
+
 // Service is the transport-agnostic ingest core.
 type Service struct {
 	db     *pgxpool.Pool

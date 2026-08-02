@@ -55,7 +55,7 @@ func main() {
 	}()
 
 	// gRPC server
-	grpcSrv := ingest.NewGRPCServer(svc)
+	grpcSrv := ingest.NewGRPCServer(svc, cfg.APIKey)
 	go func() {
 		lis, err := net.Listen("tcp", *grpcAddr)
 		if err != nil {
