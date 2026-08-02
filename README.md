@@ -1,6 +1,6 @@
 # SOC Dashboard
 
-SOC Dashboard is a Flask and PostgreSQL web app for triaging security alerts. It takes alerts over a REST API (log-analyzer pushes them, though any tool sending the right JSON works), holds them in a severity-ranked queue, and lets an analyst mark each one true positive, false positive, or escalation in a single click. It timestamps every action and turns those into SOC KPIs (MTTR, SLA-breach rate, escalation rate) drawn with Chart.js. It is the triage stage of a two-part pipeline: [log-analyzer](https://github.com/Romil2112/log-analyzer) detects the incidents, SOC Dashboard is where a person works them.
+SOC Dashboard is a Flask and PostgreSQL web app for triaging security alerts. It takes alerts over REST, gRPC (Go ingest microservice), or Kafka — any of the three lands alerts in the same severity-ranked queue, and an analyst marks each one true positive, false positive, or escalation in a single click. It timestamps every action and turns those into SOC KPIs (MTTR, SLA-breach rate, escalation rate) drawn with Chart.js. It is the triage stage of a two-part pipeline: [log-analyzer](https://github.com/Romil2112/log-analyzer) detects the incidents, SOC Dashboard is where a person works them.
 
 ## Screenshots
 
@@ -22,7 +22,7 @@ Dashboard walkthrough — KPI cards, alert queue with one-click triage, and anal
 
 ## How it works
 
-Alerts reach the dashboard three ways and all land in one queue: a detector POSTs to the Flask REST endpoint, sends a gRPC call to the Go ingest microservice, or publishes to the Kafka topic the Go service consumes. Analysts sign in and work the queue in the browser. Every read and write goes through one PostgreSQL database holding three tables (alerts, analyst_actions, users), and `/api/stats` aggregates that into the charts and the SLA and MTTR numbers.
+Alerts reach the dashboard three ways and all land in one queue: a detector POSTs to the Flask REST endpoint, sends a gRPC call to the Go ingest microservice, or publishes to the Kafka topic the Go service consumes. Analysts sign in and work the queue in the browser. Every read and write goes through one PostgreSQL database holding four tables (alerts, analyst_actions, users, audit_log), and `/api/stats` aggregates that into the charts and the SLA and MTTR numbers.
 
 Security sits on a few specific choices. The ingest endpoint checks its API key with a constant-time comparison, so response timing does not reveal how much of the key was right. Analyst passwords are stored as bcrypt hashes and there is no self-registration: accounts are created from the CLI. Session routes sit behind CSRF protection, while the machine-to-machine ingest route is exempt because it authenticates by key rather than by cookie. Errors return JSON with a fixed message and no stack trace, so a failed request does not leak internal file paths.
 
@@ -134,7 +134,7 @@ Copy `.env.example` to `.env` and fill these in. The two required ones make the 
 | `FLASK_SECRET_KEY` | yes | — | Signs analyst login sessions; app won't start without it |
 | `ALERTS_API_KEY` | for ingest | — | `X-API-Key` that `POST /api/alerts` checks (constant-time) |
 | `DATABASE_URL` | — | `postgresql://localhost/soc_dashboard` | PostgreSQL connection string |
-| `DB_ENCRYPTION_KEY` | — | unset (plaintext) | Enables Fernet encryption of title/source_ip/description at rest |
+| `DB_ENCRYPTION_KEY` | — | unset (plaintext) | Enables Fernet encryption of title/source_ip/description and audit case notes at rest |
 | `ALERT_RETENTION_DAYS` | — | `0` (keep forever) | Purge alerts older than N days at startup |
 | `FLASK_DEBUG` | — | off | Set `1`/`true` for the Werkzeug debugger (local dev only) |
 | `HOST` / `PORT` | — | `127.0.0.1` / `8000` | Bind address and port for `python app.py` |
@@ -151,7 +151,7 @@ flowchart LR
     LA[log-analyzer] -->|gRPC IngestAlert<br/>X-API-Key| GO[Go ingest service<br/>REST :8001 · gRPC :9001]
     LA -->|POST /api/alerts<br/>X-API-Key| FLASK[Flask app :8000]
     KAF[Kafka topic] --> GO
-    GO --> DB[(PostgreSQL<br/>alerts · analyst_actions · users<br/>pgvector embeddings)]
+    GO --> DB[(PostgreSQL<br/>alerts · analyst_actions · users · audit_log<br/>pgvector embeddings)]
     FLASK --> DB
     A[Analyst browser] -->|login session| FLASK
     FLASK -->|classify / escalate| DB
