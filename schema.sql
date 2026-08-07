@@ -57,11 +57,12 @@ CREATE TABLE analyst_actions (
     response_time_seconds INT
 );
 
-CREATE INDEX idx_alerts_status   ON alerts(status);
-CREATE INDEX idx_alerts_severity ON alerts(severity);
-CREATE INDEX idx_alerts_category ON alerts(category);
-CREATE INDEX idx_alerts_source   ON alerts(source);
-CREATE INDEX idx_alerts_assigned ON alerts(assigned_to);
+CREATE INDEX idx_alerts_status     ON alerts(status);
+CREATE INDEX idx_alerts_severity   ON alerts(severity);
+CREATE INDEX idx_alerts_category   ON alerts(category);
+CREATE INDEX idx_alerts_source     ON alerts(source);
+CREATE INDEX idx_alerts_assigned   ON alerts(assigned_to);
+CREATE INDEX idx_alerts_created_at ON alerts(created_at DESC);
 CREATE INDEX idx_actions_alert   ON analyst_actions(alert_id);
 CREATE INDEX idx_actions_analyst ON analyst_actions(analyst_name);
 

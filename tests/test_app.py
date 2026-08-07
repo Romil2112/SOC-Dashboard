@@ -14,13 +14,13 @@ def test_pages_render(client):
 
 
 def test_open_alerts_only_and_severity_sorted(client):
-    rows = client.get("/api/alerts").get_json()
+    rows = client.get("/api/alerts").get_json()["alerts"]
     assert [r["id"] for r in rows] == [4, 3]          # HIGH before LOW; only open
     assert all(r["status"] == "open" for r in rows)
 
 
 def test_all_alerts_returns_everything(client):
-    rows = client.get("/api/alerts/all").get_json()
+    rows = client.get("/api/alerts/all").get_json()["alerts"]
     assert len(rows) == 4
 
 
@@ -56,23 +56,23 @@ def test_stats_by_source_and_assignees(client):
 
 
 def test_filter_alerts_by_severity(client):
-    rows = client.get("/api/alerts/all?severity=CRITICAL").get_json()
+    rows = client.get("/api/alerts/all?severity=CRITICAL").get_json()["alerts"]
     assert sorted(r["id"] for r in rows) == [1, 2]
 
 
 def test_filter_alerts_by_source(client):
-    rows = client.get("/api/alerts/all?source=EDR").get_json()
+    rows = client.get("/api/alerts/all?source=EDR").get_json()["alerts"]
     assert [r["id"] for r in rows] == [2]
 
 
 def test_filter_alerts_by_assignee(client):
-    rows = client.get("/api/alerts/all?assigned_to=bob").get_json()
+    rows = client.get("/api/alerts/all?assigned_to=bob").get_json()["alerts"]
     assert [r["id"] for r in rows] == [2]
 
 
 def test_filter_combines_with_open_queue(client):
     # The open queue honors filters too: only open + HIGH -> alert 4.
-    rows = client.get("/api/alerts?severity=HIGH").get_json()
+    rows = client.get("/api/alerts?severity=HIGH").get_json()["alerts"]
     assert [r["id"] for r in rows] == [4]
 
 
@@ -85,7 +85,7 @@ def test_classify_updates_status_and_closes_alert(client):
     assert resp.status_code == 200
     assert resp.get_json()["status"] == "true_positive"
     # alert 4 should no longer appear in the open queue
-    open_ids = [r["id"] for r in client.get("/api/alerts").get_json()]
+    open_ids = [r["id"] for r in client.get("/api/alerts").get_json()["alerts"]]
     assert 4 not in open_ids
 
 
@@ -166,7 +166,7 @@ def test_ingest_alert_creates_open_alert(client):
     assert created["workflow_run_id"] == "wf-abc123"
     assert "push_ref" in created["run_metadata"]
     # the ingested alert is now in the open queue
-    open_titles = [r["title"] for r in client.get("/api/alerts").get_json()]
+    open_titles = [r["title"] for r in client.get("/api/alerts").get_json()["alerts"]]
     assert payload["title"] in open_titles
 
 
@@ -248,7 +248,7 @@ def test_retention_purges_only_old_alerts(client):
     # Fixture alert 3 is 2 days old; the rest are <= 1 hour old.
     deleted = soc_app.purge_old_alerts(1)
     assert deleted == 1
-    remaining = [r["id"] for r in client.get("/api/alerts/all").get_json()]
+    remaining = [r["id"] for r in client.get("/api/alerts/all").get_json()["alerts"]]
     assert 3 not in remaining
     assert sorted(remaining) == [1, 2, 4]
 
@@ -257,7 +257,7 @@ def test_retention_disabled_is_noop(client):
     import app as soc_app
 
     assert soc_app.purge_old_alerts(0) == 0
-    assert len(client.get("/api/alerts/all").get_json()) == 4
+    assert len(client.get("/api/alerts/all").get_json()["alerts"]) == 4
 
 
 def test_sensitive_fields_encrypted_at_rest(client, monkeypatch):

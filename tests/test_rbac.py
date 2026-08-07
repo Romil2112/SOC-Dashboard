@@ -245,7 +245,7 @@ def test_note_does_not_change_alert_status():
         data=json.dumps({"note": "just a note"}),
         content_type="application/json",
     )
-    open_alerts = analyst.get("/api/alerts").get_json()
+    open_alerts = analyst.get("/api/alerts").get_json()["alerts"]
     assert any(a["id"] == 1 for a in open_alerts)
 
 
@@ -317,14 +317,14 @@ def test_sse_accessible_to_analyst(fresh):
 def test_created_after_future_returns_empty():
     _provision()
     analyst = _make_client("analyst1")
-    rows = analyst.get("/api/alerts?created_after=2099-01-01T00:00:00Z").get_json()
+    rows = analyst.get("/api/alerts?created_after=2099-01-01T00:00:00Z").get_json()["alerts"]
     assert rows == []
 
 
 def test_created_after_past_returns_recent_alerts():
     _provision()
     analyst = _make_client("analyst1")
-    rows = analyst.get("/api/alerts?created_after=2000-01-01T00:00:00Z").get_json()
+    rows = analyst.get("/api/alerts?created_after=2000-01-01T00:00:00Z").get_json()["alerts"]
     assert any(r["id"] == 1 for r in rows)
 
 
@@ -332,7 +332,7 @@ def test_created_after_today_includes_just_created_alert():
     _provision()
     analyst = _make_client("analyst1")
     today = datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00Z")
-    rows = analyst.get(f"/api/alerts?created_after={today}").get_json()
+    rows = analyst.get(f"/api/alerts?created_after={today}").get_json()["alerts"]
     assert any(r["id"] == 1 for r in rows)
 
 

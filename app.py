@@ -437,14 +437,53 @@ def analyst():
 # --------------------------------------------------------------------------- #
 # API
 # --------------------------------------------------------------------------- #
-def _list_alerts(where_sql, params):
-    """Run the shared alert-list query and return decrypted, serialized rows."""
+def _parse_pagination():
+    """Parse and validate page/per_page from the request query string.
+
+    Defaults: page=1, per_page=100. Aborts 400 on non-integer or out-of-range values.
+    per_page is capped at 500 to prevent unbounded result sets.
+    """
+    try:
+        page = int(request.args.get("page", 1))
+    except (ValueError, TypeError):
+        abort(400, description="page must be a positive integer")
+    try:
+        per_page = int(request.args.get("per_page", 100))
+    except (ValueError, TypeError):
+        abort(400, description="per_page must be an integer between 1 and 500")
+    if page < 1:
+        abort(400, description="page must be >= 1")
+    if per_page < 1 or per_page > 500:
+        abort(400, description="per_page must be between 1 and 500")
+    return page, per_page
+
+
+def _list_alerts(where_sql, params, page: int, per_page: int) -> dict:
+    """Run the shared alert-list query and return a paginated envelope.
+
+    The COUNT uses the same WHERE clause so ``total`` reflects the filtered
+    set, not the whole table.
+    """
+    offset = (page - 1) * per_page
     with get_conn() as conn, conn.cursor() as cur:
         # nosec B608: where_sql is assembled only from the whitelisted
         # FILTER_COLUMNS names; every value is bound as a parameter.
-        cur.execute("SELECT * FROM alerts" + where_sql + _SEVERITY_ORDER, params)  # nosec B608
+        cur.execute("SELECT count(*) AS c FROM alerts" + where_sql, params)  # nosec B608
+        total = cur.fetchone()["c"]
+        cur.execute(  # nosec B608
+            "SELECT * FROM alerts" + where_sql + _SEVERITY_ORDER + " LIMIT %s OFFSET %s",
+            params + [per_page, offset],
+        )
         rows = cur.fetchall()
-    return [serialize(decrypt_alert(r)) for r in rows]
+    alerts = [serialize(decrypt_alert(r)) for r in rows]
+    total_pages = (total + per_page - 1) // per_page if total else 0
+    return {
+        "alerts": alerts,
+        "page": page,
+        "per_page": per_page,
+        "total": total,
+        "total_pages": total_pages,
+    }
 
 
 @app.route("/api/alerts")
@@ -452,10 +491,12 @@ def _list_alerts(where_sql, params):
 def api_open_alerts():
     """Open queue, optionally filtered by severity/source/assignee.
 
-    CRITICAL -> LOW then newest first.
+    CRITICAL -> LOW then newest first. Paginated: page/per_page params
+    (default page=1, per_page=100, max per_page=500).
     """
+    page, per_page = _parse_pagination()
     where_sql, params = alert_filters(extra=[("status = %s", "open")])
-    return jsonify(_list_alerts(where_sql, params))
+    return jsonify(_list_alerts(where_sql, params, page, per_page))
 
 
 @app.route("/api/alerts/all")
@@ -463,10 +504,12 @@ def api_open_alerts():
 def api_all_alerts():
     """Every alert, optionally filtered by severity/source/assignee.
 
-    CRITICAL -> LOW then newest first.
+    CRITICAL -> LOW then newest first. Paginated: page/per_page params
+    (default page=1, per_page=100, max per_page=500).
     """
+    page, per_page = _parse_pagination()
     where_sql, params = alert_filters()
-    return jsonify(_list_alerts(where_sql, params))
+    return jsonify(_list_alerts(where_sql, params, page, per_page))
 
 
 def _valid_api_key():

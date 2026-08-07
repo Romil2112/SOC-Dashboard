@@ -49,8 +49,8 @@ function filterQuery() {
   if (f.severity) qs.set("severity", f.severity);
   if (f.source) qs.set("source", f.source);
   if (f.assigned_to) qs.set("assigned_to", f.assigned_to);
-  const s = qs.toString();
-  return s ? `?${s}` : "";
+  qs.set("per_page", "500");
+  return `?${qs.toString()}`;
 }
 
 // Returns query string for the active preset (merged with filter selects).
@@ -72,8 +72,8 @@ function presetQuery() {
     qs.set("created_after", today.toISOString());
   }
   // "escalated" and "all-open" handled in loadAlerts
-  const s = qs.toString();
-  return s ? `?${s}` : "";
+  qs.set("per_page", "500");
+  return `?${qs.toString()}`;
 }
 
 async function applyPreset(preset) {
@@ -156,14 +156,16 @@ async function loadAlerts() {
   let alerts;
   if (_activePreset === "escalated") {
     const res = await fetch("/api/alerts/all" + filterQuery());
-    const all = await res.json();
-    alerts = all.filter(a => a.status === "escalated");
+    const data = await res.json();
+    alerts = (data.alerts || []).filter(a => a.status === "escalated");
   } else if (_activePreset === "all-open") {
     const res = await fetch("/api/alerts" + filterQuery());
-    alerts = await res.json();
+    const data = await res.json();
+    alerts = data.alerts || [];
   } else {
     const res = await fetch("/api/alerts" + presetQuery());
-    alerts = await res.json();
+    const data = await res.json();
+    alerts = data.alerts || [];
   }
   const tbody = document.getElementById("alert-rows");
   if (!tbody) return;
