@@ -293,7 +293,8 @@ function tally(rows, key) {
 async function loadDistribution() {
   // Charts reflect the *filtered* alert population (all statuses).
   const res = await fetch("/api/alerts/all" + filterQuery());
-  const alerts = await res.json();
+  const data = await res.json();
+  const alerts = data.alerts || [];
 
   const byCategory = tally(alerts, "category");
   const bySeverity = tally(alerts, "severity");
@@ -331,7 +332,7 @@ function initCharts() {
     categoryChart = new Chart(catCtx, {
       type: "doughnut",
       data: { labels: [], datasets: [{ data: [], backgroundColor: [] }] },
-      options: { responsive: true, maintainAspectRatio: false,
+      options: { animation: { duration: 0 }, responsive: true, maintainAspectRatio: false,
                  plugins: { legend: { position: "right" } } },
     });
   }
@@ -339,7 +340,7 @@ function initCharts() {
     severityChart = new Chart(sevCtx, {
       type: "bar",
       data: { labels: [], datasets: [{ label: "Alerts", data: [], backgroundColor: [] }] },
-      options: { responsive: true, maintainAspectRatio: false,
+      options: { animation: { duration: 0 }, responsive: true, maintainAspectRatio: false,
                  scales: { y: { beginAtZero: true } },
                  plugins: { legend: { display: false } } },
     });
@@ -348,7 +349,7 @@ function initCharts() {
     sourceChart = new Chart(srcCtx, {
       type: "bar",
       data: { labels: [], datasets: [{ label: "Alerts", data: [], backgroundColor: [] }] },
-      options: { indexAxis: "y", responsive: true, maintainAspectRatio: false,
+      options: { animation: { duration: 0 }, indexAxis: "y", responsive: true, maintainAspectRatio: false,
                  scales: { x: { beginAtZero: true } },
                  plugins: { legend: { display: false } } },
     });

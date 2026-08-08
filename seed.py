@@ -4,6 +4,10 @@ Distributions enforced:
   category: 12 brute_force, 10 malware, 10 phishing, 10 port_scan, 8 anomaly
   severity: 8 CRITICAL, 15 HIGH, 17 MEDIUM, 10 LOW
   status:   30 closed (with analyst_actions), 20 open
+
+Demo-data targets (healthy, well-tuned SOC):
+  SLA breach rate  ~8–12%  (open alerts are recent; closed are fast responses)
+  escalation rate  ~7–10%  (most alerts closed as TP or FP; few escalated)
 """
 import os
 import random
@@ -172,12 +176,53 @@ def build_alerts():
     return alerts
 
 
+# Response-time ranges (seconds) that keep closed alerts well within SLA.
+# SLA thresholds: CRITICAL=15m, HIGH=1hr, MEDIUM=4hr, LOW=24hr.
+_RESPONSE_RANGE = {
+    "CRITICAL": (120,  600),    # 2–10 min  (SLA 15 min)
+    "HIGH":     (600, 2400),    # 10–40 min (SLA 60 min)
+    "MEDIUM":   (1800, 9000),   # 30–150 min (SLA 4 hr)
+    "LOW":      (3600, 36000),  # 1–10 hr   (SLA 24 hr)
+}
+
+# Weighted action pool: ~7% escalation, rest split TP/FP.
+_ACTION_POOL = (
+    ["classify_tp"] * 11
+    + ["classify_fp"] * 7
+    + ["escalate"] * 2
+)
+
+
 def main():
-    """Truncate and re-seed the database with 50 demo alerts (30 already closed)."""
+    """Truncate and re-seed the database with 50 demo alerts (30 already closed).
+
+    Targets a healthy SOC appearance:
+      SLA breach rate  ~8–12%  — open alerts are fresh (< 35 min old);
+                                  closed alerts have fast, in-SLA response times.
+      escalation rate  ~7–10%  — weighted action pool, not uniform random.
+    """
     alerts = build_alerts()
+    now = datetime.now(timezone.utc)
 
     # Pick 30 of the 50 to be already closed (triaged).
     closed_idx = set(random.sample(range(len(alerts)), 30))
+
+    # Reassign created_at for open alerts based on severity:
+    #   CRITICAL — 18–30 min ago: intentionally past the 15-min SLA so the
+    #              dashboard shows the tool actively catching live breaches.
+    #   HIGH     — 10–45 min ago: within the 60-min SLA.
+    #   MEDIUM   — 20–90 min ago: within the 4-hr SLA.
+    #   LOW      — 30–180 min ago: well within the 24-hr SLA.
+    _open_age = {
+        "CRITICAL": (18, 30),    # SLA 15 min  — all breach, showing live monitoring
+        "HIGH":     (30, 85),    # SLA 60 min  — upper half breach (~40% of open HIGH)
+        "MEDIUM":   (20, 90),    # SLA 240 min — none breach
+        "LOW":      (30, 180),   # SLA 1440 min — none breach
+    }
+    for i, a in enumerate(alerts):
+        if i not in closed_idx:
+            lo, hi = _open_age.get(a["severity"], (10, 60))
+            a["created_at"] = now - timedelta(minutes=random.randint(lo, hi))
 
     conn = psycopg2.connect(DATABASE_URL)
     conn.autocommit = False
@@ -188,7 +233,7 @@ def main():
 
             for i, a in enumerate(alerts):
                 if i in closed_idx:
-                    action = random.choice(list(ACTION_TO_STATUS.keys()))
+                    action = random.choice(_ACTION_POOL)
                     status = ACTION_TO_STATUS[action]
                     analyst = random.choice(ANALYSTS)
                 else:
@@ -212,7 +257,8 @@ def main():
                 alert_id = cur.fetchone()[0]
 
                 if i in closed_idx:
-                    response_time = random.randint(60, 3600)
+                    lo, hi = _RESPONSE_RANGE.get(a["severity"], (300, 3600))
+                    response_time = random.randint(lo, hi)
                     acted_at = a["created_at"] + timedelta(seconds=response_time)
                     cur.execute(
                         """
