@@ -46,7 +46,7 @@ Security sits on a few specific choices. The ingest endpoint checks its API key 
 - **pgvector semantic similarity** — `POST /api/alerts` stores a fastembed embedding; `GET /api/alerts/<id>/similar` returns the top 5 by cosine distance. **First-use note:** the `BAAI/bge-small-en-v1.5` model (~130 MB) is downloaded from the fastembed CDN on the first alert ingest after a fresh deployment (cached to `~/.cache/fastembed/` afterward). If the download fails, embeddings degrade gracefully — ingest still succeeds, but `/api/alerts/<id>/similar` returns HTTP 503 with `{"error": "embeddings_unavailable"}` instead of silently returning an empty list.
 - **Kubernetes manifests** — `deploy/k8s/` covers Deployment, HPA, Ingress, and Namespace with a separate `Dockerfile.ingest-service` for the Go binary
 - **GCP deployment** — `deploy/gcp/` (Cloud Run service YAML + Cloud Build pipeline) and `terraform/gcp/` provision the full stack
-- 142 pytest + 87 Go = **229 tests** covering the ingest API, auth/CSRF, RBAC, KPI math, encryption, audit trail, Kafka consumer, Redis SSE, pgvector similarity, pagination, and the full Go ingest handler and gRPC interceptor surface
+- 145 pytest + 91 Go = **236 tests** covering the ingest API, auth/CSRF, RBAC, KPI math, encryption, audit trail, Kafka consumer, Redis SSE, pgvector similarity, fastembed load-failure sentinel and 503 degradation, pagination, and the full Go ingest handler and gRPC interceptor surface
 
 ## Running the Project
 
@@ -169,7 +169,7 @@ flowchart LR
 
 ## Tests
 
-**142 pytest + 87 Go = 229 tests.** The Python suite covers the ingest API, auth/CSRF, RBAC roles, the classify/escalate flow, KPI math (MTTR, SLA, escalation), filter query params, server-side pagination, Fernet encryption at rest, audit trail, SSE live updates, Kafka consumer, Redis pub/sub, pgvector semantic similarity, and the seed and user-management CLIs. The Go suite tests the REST and gRPC ingest handlers, `apiKeyInterceptor` boundary conditions (empty key, no metadata, constant-time comparison, whitespace trimming), W3C traceparent parsing edge cases (Python OTel ≥ 1.44 `flags=03`, zero IDs, extra segments, invalid hex), and proto field mapping (`SourceIp→SourceIP`, `WorkflowRunId→WorkflowRunID`). Both suites run against a real PostgreSQL database (Docker on port 5433 for CI). Point `DATABASE_URL` at a throwaway database and run:
+**145 pytest + 91 Go = 236 tests.** The Python suite covers the ingest API, auth/CSRF, RBAC roles, the classify/escalate flow, KPI math (MTTR, SLA, escalation), filter query params, server-side pagination, Fernet encryption at rest, audit trail, SSE live updates, Kafka consumer, Redis pub/sub, pgvector semantic similarity, fastembed load-failure sentinel and 503 degradation path, and the seed and user-management CLIs. The Go suite tests the REST and gRPC ingest handlers, `apiKeyInterceptor` boundary conditions (empty key, no metadata, constant-time comparison, whitespace trimming), W3C traceparent parsing edge cases (Python OTel ≥ 1.44 `flags=03`, zero IDs, extra segments, invalid hex), proto field mapping (`SourceIp→SourceIP`, `WorkflowRunId→WorkflowRunID`), OTel SDK-disabled guard (case-insensitive variants), and bounded 5-second shutdown timeout. Both suites run against a real PostgreSQL database (Docker on port 5433 for CI). Point `DATABASE_URL` at a throwaway database and run:
 
 ```bash
 python -m pytest tests/ -v
@@ -185,7 +185,7 @@ python -m pytest tests/ -v
 | Semantic search | fastembed embeddings stored in pgvector; `GET /api/alerts/<id>/similar` returns top-5 by cosine distance |
 | Horizontal scaling | Redis pub/sub for multi-worker SSE; K8s HPA manifest scales ingest replicas on CPU/RPS |
 | Cloud deployment | Cloud Run + Cloud Build (`deploy/gcp/`); Terraform provisions GCP infra (`terraform/gcp/`) |
-| Test engineering | 229 tests (142 Python + 87 Go) exercising boundary conditions, constant-time comparisons, W3C traceparent edge cases, and proto field mapping without a live database |
+| Test engineering | 236 tests (145 Python + 91 Go) exercising boundary conditions, constant-time comparisons, W3C traceparent edge cases, proto field mapping, OTel SDK-disabled guard, and fastembed 503 degradation |
 
 ## Roles & Permissions
 
