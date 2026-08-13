@@ -1,6 +1,7 @@
 """SOC Analyst Dashboard — Flask + psycopg2 (no ORM)."""
 import hmac
 import json
+import logging
 import os
 import queue
 import threading
@@ -35,6 +36,8 @@ from flask_wtf.csrf import CSRFProtect
 from crypto import decrypt_field, encrypt_field, get_fernet
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------- #
 # Redis (optional) — SSE pub/sub and distributed state
@@ -98,18 +101,31 @@ print(
 # Semantic embedding (fastembed + pgvector)
 # --------------------------------------------------------------------------- #
 _EMBEDDING_MODEL = None
+_EMBEDDING_LOAD_FAILED = "unavailable"  # sentinel — set after a failed load attempt
 
 
 def _get_embedding_model():
-    """Load fastembed TextEmbedding on first call; return None if unavailable."""
+    """Load fastembed TextEmbedding on first call; return None if unavailable.
+
+    On failure the sentinel _EMBEDDING_LOAD_FAILED is stored so subsequent
+    calls skip the (potentially slow) download attempt instead of retrying.
+    """
     global _EMBEDDING_MODEL
     if _EMBEDDING_MODEL is None:
         try:
             from fastembed import TextEmbedding
             _EMBEDDING_MODEL = TextEmbedding("BAAI/bge-small-en-v1.5")
-        except Exception:
-            pass
-    return _EMBEDDING_MODEL
+        except Exception as exc:
+            logger.warning(
+                "fastembed model load failed — semantic similarity disabled: %s", exc
+            )
+            _EMBEDDING_MODEL = _EMBEDDING_LOAD_FAILED
+    return None if _EMBEDDING_MODEL is _EMBEDDING_LOAD_FAILED else _EMBEDDING_MODEL
+
+
+def _embeddings_available() -> bool:
+    """True unless the embedding model previously failed to load."""
+    return _EMBEDDING_MODEL is not _EMBEDDING_LOAD_FAILED
 
 
 def _embed_text(text):
@@ -625,6 +641,11 @@ def api_ingest_alert():
 @login_required
 def api_similar_alerts(alert_id):
     """Return the top-5 alerts most semantically similar to alert_id by cosine distance."""
+    if not _embeddings_available():
+        return jsonify({
+            "error": "embeddings_unavailable",
+            "detail": "fastembed model failed to load at startup; restart the server to retry",
+        }), 503
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(

@@ -1,4 +1,7 @@
 """Tests for 1C: semantic alert similarity (fastembed + pgvector)."""
+import logging
+import sys
+import types
 import pytest
 from unittest.mock import MagicMock
 
@@ -40,20 +43,26 @@ def test_similar_requires_login(anon_client):
     assert res.status_code in (302, 401)
 
 
-def test_similar_returns_list(client):
-    # Alert 1 exists (from conftest fixture) but has no embedding yet → returns [].
+def test_similar_returns_list(client, monkeypatch):
+    # Model "available" but no embedding rows → empty list, not 503.
+    import app as soc_app
+    monkeypatch.setattr(soc_app, "_EMBEDDING_MODEL", MagicMock())
     res = client.get("/api/alerts/1/similar")
     assert res.status_code == 200
     assert isinstance(res.get_json(), list)
 
 
-def test_similar_returns_empty_for_alert_without_embedding(client):
+def test_similar_returns_empty_for_alert_without_embedding(client, monkeypatch):
+    import app as soc_app
+    monkeypatch.setattr(soc_app, "_EMBEDDING_MODEL", MagicMock())
     res = client.get("/api/alerts/1/similar")
     assert res.get_json() == []
 
 
-def test_similar_returns_empty_gracefully_for_nonexistent_alert(client):
+def test_similar_returns_empty_gracefully_for_nonexistent_alert(client, monkeypatch):
     # alert_id 9999 doesn't exist — no embedding row, so returns [].
+    import app as soc_app
+    monkeypatch.setattr(soc_app, "_EMBEDDING_MODEL", MagicMock())
     res = client.get("/api/alerts/9999/similar")
     assert res.status_code == 200
     assert res.get_json() == []
@@ -71,6 +80,53 @@ def test_ingest_succeeds_when_embed_text_returns_none(client, monkeypatch):
     )
     assert res.status_code == 201
     assert res.get_json()["title"] == "No-embed test"
+
+
+def test_embedding_failure_sets_sentinel_and_logs(monkeypatch, caplog):
+    """TextEmbedding raising must log a warning and set the sentinel (not None)."""
+    import app as soc_app
+
+    monkeypatch.setattr(soc_app, "_EMBEDDING_MODEL", None)
+
+    fake_fastembed = types.ModuleType("fastembed")
+    call_count = []
+
+    def _raising(model_name):
+        call_count.append(1)
+        raise RuntimeError("model download failed: connection refused")
+
+    fake_fastembed.TextEmbedding = _raising
+    monkeypatch.setitem(sys.modules, "fastembed", fake_fastembed)
+
+    with caplog.at_level(logging.WARNING, logger="app"):
+        result1 = soc_app._get_embedding_model()
+        result2 = soc_app._get_embedding_model()
+
+    assert result1 is None
+    assert result2 is None
+    assert len(call_count) == 1, "TextEmbedding must not be constructed again after failure"
+    assert any(
+        "fastembed" in r.message and "failed" in r.message
+        for r in caplog.records
+    ), "a WARNING about the failure must be emitted"
+    assert soc_app._EMBEDDING_MODEL is soc_app._EMBEDDING_LOAD_FAILED
+
+
+def test_embeddings_available_false_after_failure(monkeypatch):
+    """_embeddings_available() must return False when sentinel is set."""
+    import app as soc_app
+    monkeypatch.setattr(soc_app, "_EMBEDDING_MODEL", soc_app._EMBEDDING_LOAD_FAILED)
+    assert soc_app._embeddings_available() is False
+
+
+def test_similar_returns_503_when_embeddings_unavailable(client, monkeypatch):
+    """GET /api/alerts/<id>/similar must return 503 when embedding model failed."""
+    import app as soc_app
+    monkeypatch.setattr(soc_app, "_EMBEDDING_MODEL", soc_app._EMBEDDING_LOAD_FAILED)
+    res = client.get("/api/alerts/1/similar")
+    assert res.status_code == 503
+    body = res.get_json()
+    assert body["error"] == "embeddings_unavailable"
 
 
 def test_ingest_succeeds_when_embed_text_returns_vector(client, monkeypatch):
