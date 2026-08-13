@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/Romil2112/SOC-Dashboard/internal/ingest"
 )
@@ -31,7 +32,11 @@ func main() {
 	defer stop()
 
 	shutdownTracer := initTracer(ctx)
-	defer shutdownTracer(context.Background())
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		shutdownTracer(ctx)
+	}()
 
 	svc, err := ingest.NewService(ctx, cfg)
 	if err != nil {

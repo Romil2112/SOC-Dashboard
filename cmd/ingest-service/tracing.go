@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"strings"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
@@ -19,6 +20,11 @@ const _serviceName = "soc-ingest"
 // function to flush pending spans on exit. Tracing failures are logged but do
 // not prevent the service from starting — spans are simply dropped.
 func initTracer(ctx context.Context) func(context.Context) {
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("OTEL_SDK_DISABLED")), "true") {
+		slog.Info("OTel tracing disabled via OTEL_SDK_DISABLED")
+		return func(context.Context) {}
+	}
+
 	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
 	if endpoint == "" {
 		endpoint = "localhost:4317"

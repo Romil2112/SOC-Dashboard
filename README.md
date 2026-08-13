@@ -141,6 +141,7 @@ Copy `.env.example` to `.env` and fill these in. The two required ones make the 
 | `REDIS_URL` | — | unset | Redis connection string; enables multi-worker SSE pub/sub |
 | `KAFKA_BROKER` | — | unset | Bootstrap servers; starts the Kafka consumer when set |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | — | unset | OTLP endpoint for Go ingest service distributed tracing |
+| `OTEL_SDK_DISABLED` | — | unset | Set to `true` to skip tracer initialisation in the Go ingest service. Without a reachable OTLP collector (e.g. Jaeger), leaving this unset causes a silent hang of up to 5 s on service shutdown while the `BatchSpanProcessor` tries to flush buffered spans. |
 
 ## Architecture diagram
 
