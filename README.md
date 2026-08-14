@@ -46,7 +46,8 @@ Security sits on a few specific choices. The ingest endpoint checks its API key 
 - **pgvector semantic similarity** — `POST /api/alerts` stores a fastembed embedding; `GET /api/alerts/<id>/similar` returns the top 5 by cosine distance. **First-use note:** the `BAAI/bge-small-en-v1.5` model (~130 MB) is downloaded from the fastembed CDN on the first alert ingest after a fresh deployment (cached to `~/.cache/fastembed/` afterward). If the download fails, embeddings degrade gracefully — ingest still succeeds, but `/api/alerts/<id>/similar` returns HTTP 503 with `{"error": "embeddings_unavailable"}` instead of silently returning an empty list.
 - **Kubernetes manifests** — `deploy/k8s/` covers Deployment, HPA, Ingress, and Namespace with a separate `Dockerfile.ingest-service` for the Go binary
 - **GCP deployment** — `deploy/gcp/` (Cloud Run service YAML + Cloud Build pipeline) and `terraform/gcp/` provision the full stack
-- 145 pytest + 91 Go = **236 tests** covering the ingest API, auth/CSRF, RBAC, KPI math, encryption, audit trail, Kafka consumer, Redis SSE, pgvector similarity, fastembed load-failure sentinel and 503 degradation, pagination, and the full Go ingest handler and gRPC interceptor surface
+- **Conductor WAIT-gate approval** — `POST /api/alerts/<workflow_run_id>/approve` (behind `@login_required`) calls `OrkesTaskClient.update_task_sync` to release the `approval_wait_ref` WAIT task in `log_analyzer_soc_pipeline_orchestrated`, unblocking `push_to_dashboard` for CRITICAL-severity workflow runs that require human sign-off before incidents reach the queue
+- 151 pytest + 91 Go = **242 tests** covering the ingest API, auth/CSRF, RBAC, KPI math, encryption, audit trail, Kafka consumer, Redis SSE, pgvector similarity, fastembed load-failure sentinel and 503 degradation, pagination, Conductor WAIT-gate approval (auth boundary, 503 on missing URL/SDK, correct `update_task_sync` args, note forwarding, 502 on Conductor error), and the full Go ingest handler and gRPC interceptor surface
 
 ## Running the Project
 
@@ -118,6 +119,7 @@ The `docker-compose.yml` starts PostgreSQL, runs the schema migration, and start
 | POST | `/api/alerts` | **Ingest** a new alert `{title, category, severity, source?, source_ip?, description?, workflow_run_id?, run_metadata?}` → 201 |
 | POST | `/api/alerts/<id>/classify` | Classify alert `{analyst, action}` |
 | GET | `/api/alerts/<id>/similar` | Top-5 semantically similar alerts by cosine distance (pgvector) |
+| POST | `/api/alerts/<workflow_run_id>/approve` | Release the Conductor `approval_wait_ref` WAIT gate for a CRITICAL-severity workflow run; requires analyst session (`@login_required`); calls `OrkesTaskClient.update_task_sync` → `{"workflow_run_id", "approved_by", "status": "released"}` |
 | GET | `/api/stats` | Summary counts + `by_category` / `by_severity` / `by_source` + `escalation` + `sla` + MTTR by analyst + `assignees` |
 | gRPC | `AlertIngestService/IngestAlert` | Same ingest contract as REST, served by the Go microservice on `:9001` |
 
@@ -169,7 +171,7 @@ flowchart LR
 
 ## Tests
 
-**145 pytest + 91 Go = 236 tests.** The Python suite covers the ingest API, auth/CSRF, RBAC roles, the classify/escalate flow, KPI math (MTTR, SLA, escalation), filter query params, server-side pagination, Fernet encryption at rest, audit trail, SSE live updates, Kafka consumer, Redis pub/sub, pgvector semantic similarity, fastembed load-failure sentinel and 503 degradation path, and the seed and user-management CLIs. The Go suite tests the REST and gRPC ingest handlers, `apiKeyInterceptor` boundary conditions (empty key, no metadata, constant-time comparison, whitespace trimming), W3C traceparent parsing edge cases (Python OTel ≥ 1.44 `flags=03`, zero IDs, extra segments, invalid hex), proto field mapping (`SourceIp→SourceIP`, `WorkflowRunId→WorkflowRunID`), OTel SDK-disabled guard (case-insensitive variants), and bounded 5-second shutdown timeout. Both suites run against a real PostgreSQL database (Docker on port 5433 for CI). Point `DATABASE_URL` at a throwaway database and run:
+**151 pytest + 91 Go = 242 tests.** The Python suite covers the ingest API, auth/CSRF, RBAC roles, the classify/escalate flow, KPI math (MTTR, SLA, escalation), filter query params, server-side pagination, Fernet encryption at rest, audit trail, SSE live updates, Kafka consumer, Redis pub/sub, pgvector semantic similarity, fastembed load-failure sentinel and 503 degradation path, the seed and user-management CLIs, and the Conductor WAIT-gate approval endpoint (unauthenticated 401/302 boundary, 503 on missing `CONDUCTOR_SERVER_URL`, 503 on missing SDK, correct `update_task_sync` args and note forwarding, 502 on Conductor error). The Go suite tests the REST and gRPC ingest handlers, `apiKeyInterceptor` boundary conditions (empty key, no metadata, constant-time comparison, whitespace trimming), W3C traceparent parsing edge cases (Python OTel ≥ 1.44 `flags=03`, zero IDs, extra segments, invalid hex), proto field mapping (`SourceIp→SourceIP`, `WorkflowRunId→WorkflowRunID`), OTel SDK-disabled guard (case-insensitive variants), and bounded 5-second shutdown timeout. Both suites run against a real PostgreSQL database (Docker on port 5433 for CI). Point `DATABASE_URL` at a throwaway database and run:
 
 ```bash
 python -m pytest tests/ -v
@@ -185,7 +187,8 @@ python -m pytest tests/ -v
 | Semantic search | fastembed embeddings stored in pgvector; `GET /api/alerts/<id>/similar` returns top-5 by cosine distance |
 | Horizontal scaling | Redis pub/sub for multi-worker SSE; K8s HPA manifest scales ingest replicas on CPU/RPS |
 | Cloud deployment | Cloud Run + Cloud Build (`deploy/gcp/`); Terraform provisions GCP infra (`terraform/gcp/`) |
-| Test engineering | 236 tests (145 Python + 91 Go) exercising boundary conditions, constant-time comparisons, W3C traceparent edge cases, proto field mapping, OTel SDK-disabled guard, and fastembed 503 degradation |
+| Workflow integration | `POST /api/alerts/<run_id>/approve` releases the Orkes Conductor WAIT gate for CRITICAL-severity runs; lazy-imports the SDK, checks `CONDUCTOR_SERVER_URL`, calls `OrkesTaskClient.update_task_sync` by task reference name, returns 503/502 on missing config or Conductor error |
+| Test engineering | 242 tests (151 Python + 91 Go) exercising boundary conditions, constant-time comparisons, W3C traceparent edge cases, proto field mapping, OTel SDK-disabled guard, fastembed 503 degradation, and Conductor WAIT-gate approval auth/error paths |
 
 ## Roles & Permissions
 
