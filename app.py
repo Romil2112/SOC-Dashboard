@@ -978,6 +978,64 @@ def api_add_note(alert_id):
 
 
 # --------------------------------------------------------------------------- #
+# Conductor human-approval gate
+# --------------------------------------------------------------------------- #
+# Task reference name of the WAIT task defined in conductor_orchestrated.json.
+# Completing it by this ref name releases a CRITICAL-severity workflow run.
+_CONDUCTOR_APPROVAL_TASK_REF = "approval_wait_ref"
+
+
+@app.route("/api/alerts/<workflow_run_id>/approve", methods=["POST"])
+@login_required
+def api_approve_workflow(workflow_run_id):
+    """Release the human-approval WAIT gate for a CRITICAL-incident workflow run.
+
+    Calls the Conductor Task Update API to mark the WAIT task (approval_wait_ref)
+    as COMPLETED, which lets the workflow proceed to push_to_dashboard. Requires
+    analyst login; returns 503 when Conductor is not configured in the environment.
+
+    POST body (JSON, optional):
+        { "note": "<analyst note about the approval decision>" }
+
+    Returns 200 with the workflow_run_id and approving analyst on success.
+    """
+    try:
+        from conductor.client.configuration.configuration import Configuration
+        from conductor.client.orkes.orkes_task_client import OrkesTaskClient
+    except ImportError:
+        return jsonify({"error": "conductor SDK not installed"}), 503
+
+    if not os.environ.get("CONDUCTOR_SERVER_URL"):
+        return jsonify({"error": "CONDUCTOR_SERVER_URL not configured"}), 503
+
+    body = request.get_json(silent=True) or {}
+    note = (body.get("note") or "").strip()
+
+    try:
+        task_client = OrkesTaskClient(Configuration())
+        task_client.update_task_sync(
+            workflow_id=workflow_run_id,
+            task_ref_name=_CONDUCTOR_APPROVAL_TASK_REF,
+            status="COMPLETED",
+            output={
+                "approved_by": current_user.username,
+                "note": note,
+            },
+        )
+    except Exception as exc:
+        logger.warning(
+            "Conductor approval failed for workflow %s: %s", workflow_run_id, exc
+        )
+        return jsonify({"error": f"conductor error: {type(exc).__name__}"}), 502
+
+    return jsonify({
+        "workflow_run_id": workflow_run_id,
+        "approved_by": current_user.username,
+        "status": "released",
+    })
+
+
+# --------------------------------------------------------------------------- #
 # ATT&CK Navigator layer export
 # --------------------------------------------------------------------------- #
 @app.route("/api/navigator-layer")
