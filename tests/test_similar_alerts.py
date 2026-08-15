@@ -43,32 +43,85 @@ def test_similar_requires_login(anon_client):
     assert res.status_code in (302, 401)
 
 
-def test_similar_returns_list(client, monkeypatch):
-    # Model "available" but no embedding rows → empty list, not 503.
+def _mock_similar_conn(monkeypatch, rows=None):
+    """Patch get_conn so the similarity query returns `rows` (default: empty)."""
     import app as soc_app
-    monkeypatch.setattr(soc_app, "_EMBEDDING_MODEL", MagicMock())
+    from unittest.mock import patch, MagicMock as MM
+
+    mock_cursor = MM()
+    mock_cursor.__enter__ = lambda s: s
+    mock_cursor.__exit__ = MM(return_value=False)
+    mock_cursor.fetchall.return_value = rows or []
+
+    mock_conn = MM()
+    mock_conn.__enter__ = lambda s: s
+    mock_conn.__exit__ = MM(return_value=False)
+    mock_conn.cursor.return_value = mock_cursor
+
+    monkeypatch.setattr(soc_app, "_EMBEDDING_MODEL", MM())
+    monkeypatch.setattr(soc_app, "get_conn", lambda: mock_conn)
+
+
+def test_similar_returns_list(client, monkeypatch):
+    # Model available, no embedding rows → empty list (not 503).
+    _mock_similar_conn(monkeypatch)
     res = client.get("/api/alerts/1/similar")
     assert res.status_code == 200
     assert isinstance(res.get_json(), list)
 
 
 def test_similar_returns_empty_for_alert_without_embedding(client, monkeypatch):
-    import app as soc_app
-    monkeypatch.setattr(soc_app, "_EMBEDDING_MODEL", MagicMock())
+    _mock_similar_conn(monkeypatch)
     res = client.get("/api/alerts/1/similar")
     assert res.get_json() == []
 
 
 def test_similar_returns_empty_gracefully_for_nonexistent_alert(client, monkeypatch):
     # alert_id 9999 doesn't exist — no embedding row, so returns [].
-    import app as soc_app
-    monkeypatch.setattr(soc_app, "_EMBEDDING_MODEL", MagicMock())
+    _mock_similar_conn(monkeypatch)
     res = client.get("/api/alerts/9999/similar")
     assert res.status_code == 200
     assert res.get_json() == []
 
 
 # ── integration: ingest still succeeds without embedding model ────────────────
+
+def test_similar_returns_503_and_logs_on_db_error(client, monkeypatch, caplog):
+    """A DB failure in the similarity query must return 503 with an error body and log a warning."""
+    import app as soc_app
+
+    monkeypatch.setattr(soc_app, "_EMBEDDING_MODEL", MagicMock())
+
+    # Cursor whose execute() raises to simulate a pgvector query failure.
+    mock_cursor = MagicMock()
+    mock_cursor.__enter__ = lambda s: s
+    mock_cursor.__exit__ = MagicMock(return_value=False)
+    mock_cursor.execute.side_effect = RuntimeError("pgvector unavailable")
+
+    mock_conn = MagicMock()
+    mock_conn.__enter__ = lambda s: s
+    mock_conn.__exit__ = MagicMock(return_value=False)
+    mock_conn.cursor.return_value = mock_cursor
+
+    original_get_conn = soc_app.get_conn
+    call_count = []
+
+    def get_conn_fail_on_second():
+        call_count.append(1)
+        if len(call_count) >= 2:
+            return mock_conn
+        return original_get_conn()
+
+    monkeypatch.setattr(soc_app, "get_conn", get_conn_fail_on_second)
+
+    with caplog.at_level(logging.WARNING, logger="app"):
+        res = client.get("/api/alerts/1/similar")
+
+    assert res.status_code == 503
+    body = res.get_json()
+    assert body["error"] == "similarity_query_failed"
+    assert any("similarity query failed" in r.message for r in caplog.records)
+
 
 def test_ingest_succeeds_when_embed_text_returns_none(client, monkeypatch):
     import app as soc_app

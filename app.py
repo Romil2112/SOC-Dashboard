@@ -665,8 +665,9 @@ def api_similar_alerts(alert_id):
                 (alert_id,),
             )
             rows = cur.fetchall()
-    except Exception:
-        return jsonify([])
+    except Exception as exc:
+        logger.warning("similarity query failed for alert_id=%s: %s", alert_id, exc)
+        return jsonify({"error": "similarity_query_failed"}), 503
     return jsonify([
         {
             "id":         r["id"],
