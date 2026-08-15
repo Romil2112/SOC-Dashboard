@@ -31,6 +31,29 @@ os.environ.setdefault("ALERTS_API_KEY", API_KEY := "test-api-key")
 import bcrypt  # noqa: E402
 import psycopg2  # noqa: E402
 
+# Probe the DB connection once at conftest load time so a misconfigured
+# DATABASE_URL surfaces a clear, actionable message rather than 100+ individual
+# OperationalError failures scattered across the test output.
+_DB_URL = os.environ["DATABASE_URL"]
+try:
+    _probe = psycopg2.connect(_DB_URL, connect_timeout=2)
+    _probe.close()
+except psycopg2.OperationalError as _err:
+    import sys
+    print(
+        f"\n[conftest] Cannot connect to the test database.\n"
+        f"  URL: {_DB_URL}\n"
+        f"  Error: {_err}\n\n"
+        f"  Option 1 — Docker (documented default, port 5433):\n"
+        f"    docker run -d --name soc-pg -e POSTGRES_PASSWORD=postgres \\\n"
+        f"        -e POSTGRES_DB=soc_test -p 5433:5432 postgres:16\n"
+        f"    pytest tests/\n\n"
+        f"  Option 2 — Local Homebrew Postgres (port 5432):\n"
+        f"    DATABASE_URL=postgresql://localhost/soc_test pytest tests/\n",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
 SCHEMA = (ROOT / "schema.sql").read_text()
 
 # A known analyst account used to authenticate the test client.
