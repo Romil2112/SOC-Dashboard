@@ -47,7 +47,7 @@ Security sits on a few specific choices. The ingest endpoint checks its API key 
 - **Kubernetes manifests** — `deploy/k8s/` covers Deployment, HPA, Ingress, and Namespace with a separate `Dockerfile.ingest-service` for the Go binary
 - **GCP deployment** — `deploy/gcp/` (Cloud Run service YAML + Cloud Build pipeline) and `terraform/gcp/` provision the full stack
 - **Conductor WAIT-gate approval** — `POST /api/alerts/<workflow_run_id>/approve` (behind `@login_required`) calls `OrkesTaskClient.update_task_sync` to release the `approval_wait_ref` WAIT task in `log_analyzer_soc_pipeline_orchestrated`, unblocking `push_to_dashboard` for CRITICAL-severity workflow runs that require human sign-off before incidents reach the queue
-- 151 pytest + 91 Go = **242 tests** covering the ingest API, auth/CSRF, RBAC, KPI math, encryption, audit trail, Kafka consumer, Redis SSE, pgvector similarity, fastembed load-failure sentinel and 503 degradation, pagination, Conductor WAIT-gate approval (auth boundary, 503 on missing URL/SDK, correct `update_task_sync` args, note forwarding, 502 on Conductor error), and the full Go ingest handler and gRPC interceptor surface
+- 153 pytest + 91 Go = **244 tests** covering the ingest API, auth/CSRF, RBAC, KPI math, encryption, audit trail, Kafka consumer, Redis SSE, pgvector similarity, embedding-insert failure logging (ingest continues on embedding failure), similarity-query 503 on DB error, fastembed load-failure sentinel and 503 degradation, pagination, Conductor WAIT-gate approval (auth boundary, 503 on missing URL/SDK, correct `update_task_sync` args, note forwarding, 502 on Conductor error), and the full Go ingest handler and gRPC interceptor surface
 
 ## Running the Project
 
