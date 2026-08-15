@@ -1,19 +1,16 @@
 """Unit tests for Redis-backed SSE publish/subscribe paths in app.py."""
 import json
-import sys
 import os
-from unittest.mock import MagicMock, patch, call
-
-import pytest
+import sys
+from unittest.mock import MagicMock, patch
 
 # conftest.py sets env vars (FLASK_SECRET_KEY, etc.) before any app import,
 # so the ordering here is safe.
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, ROOT)
 
-import app as soc_app
-from app import _sse_publish
-
+import app as soc_app  # noqa: E402
+from app import _sse_publish  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # _sse_publish — Redis path

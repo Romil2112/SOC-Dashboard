@@ -8,13 +8,9 @@ Covers:
   - Returns 503 when the conductor SDK is not installed
 """
 import json
-import os
 import sys
 import types
 from unittest.mock import MagicMock, patch
-
-import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -131,7 +127,6 @@ def _patch_conductor(monkeypatch, mock_task_client_cls, mock_configuration_cls):
         "conductor.client.orkes":                             types.ModuleType("conductor.client.orkes"),
         "conductor.client.orkes.orkes_task_client":           mod_task,
     }
-    monkeypatch.setitem.__func__  # ensure monkeypatch.setitem works
     for k, v in patches.items():
         monkeypatch.setitem(sys.modules, k, v)
 

@@ -2,7 +2,6 @@
 import logging
 import sys
 import types
-import pytest
 from unittest.mock import MagicMock
 
 API_HEADERS = {"X-API-Key": "test-api-key"}
@@ -46,19 +45,18 @@ def test_similar_requires_login(anon_client):
 def _mock_similar_conn(monkeypatch, rows=None):
     """Patch get_conn so the similarity query returns `rows` (default: empty)."""
     import app as soc_app
-    from unittest.mock import patch, MagicMock as MM
 
-    mock_cursor = MM()
+    mock_cursor = MagicMock()
     mock_cursor.__enter__ = lambda s: s
-    mock_cursor.__exit__ = MM(return_value=False)
+    mock_cursor.__exit__ = MagicMock(return_value=False)
     mock_cursor.fetchall.return_value = rows or []
 
-    mock_conn = MM()
+    mock_conn = MagicMock()
     mock_conn.__enter__ = lambda s: s
-    mock_conn.__exit__ = MM(return_value=False)
+    mock_conn.__exit__ = MagicMock(return_value=False)
     mock_conn.cursor.return_value = mock_cursor
 
-    monkeypatch.setattr(soc_app, "_EMBEDDING_MODEL", MM())
+    monkeypatch.setattr(soc_app, "_EMBEDDING_MODEL", MagicMock())
     monkeypatch.setattr(soc_app, "get_conn", lambda: mock_conn)
 
 
