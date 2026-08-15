@@ -591,8 +591,11 @@ def _insert_alert(body: dict, title: str, category: str, severity: str) -> dict:
                     "ON CONFLICT (alert_id) DO UPDATE SET embedding = EXCLUDED.embedding",
                     (created["id"], vec_str),
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(
+                "alert_embeddings insert failed for alert_id=%s: %s",
+                created["id"], exc,
+            )
 
     row = serialize(decrypt_alert(dict(created)))
     _sse_publish({

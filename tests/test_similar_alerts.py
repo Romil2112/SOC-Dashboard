@@ -129,6 +129,37 @@ def test_similar_returns_503_when_embeddings_unavailable(client, monkeypatch):
     assert body["error"] == "embeddings_unavailable"
 
 
+def test_embedding_insert_failure_logs_warning_and_ingest_succeeds(client, monkeypatch, caplog):
+    """When the alert_embeddings INSERT raises, a warning must be logged and ingest still returns 201."""
+    import app as soc_app
+
+    fake_vec = "[" + ",".join("0.100000" for _ in range(384)) + "]"
+    monkeypatch.setattr(soc_app, "_embed_text", lambda text: fake_vec)
+
+    original_get_conn = soc_app.get_conn
+    call_count = []
+
+    def get_conn_counting():
+        call_count.append(1)
+        if len(call_count) >= 2:
+            raise RuntimeError("pgvector not available in this environment")
+        return original_get_conn()
+
+    monkeypatch.setattr(soc_app, "get_conn", get_conn_counting)
+
+    with caplog.at_level(logging.WARNING, logger="app"):
+        res = client.post(
+            "/api/alerts",
+            json={"title": "Embed insert fail test", "category": "anomaly", "severity": "LOW"},
+            headers=API_HEADERS,
+        )
+
+    assert res.status_code == 201, f"Ingest must succeed even if embedding INSERT fails: {res.get_json()}"
+    assert any(
+        "alert_embeddings" in r.message for r in caplog.records
+    ), "a WARNING about the embedding insert failure must be logged"
+
+
 def test_ingest_succeeds_when_embed_text_returns_vector(client, monkeypatch):
     import app as soc_app
     fake_vec = "[" + ",".join("0.100000" for _ in range(384)) + "]"
