@@ -4,11 +4,9 @@ import os
 import sys
 from unittest.mock import MagicMock
 
-import pytest
-
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from kafka.consumer import GROUP_ID, TOPIC, KafkaAlertConsumer
+from kafka.consumer import TOPIC, KafkaAlertConsumer
 
 
 def _make_msg(body, error=None):

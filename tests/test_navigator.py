@@ -4,7 +4,6 @@ Uses the same `client` and `anon_client` fixtures from conftest.py.
 The FIXTURES data (4 alerts: brute_force/CRITICAL, malware/CRITICAL,
 anomaly/LOW, phishing/HIGH) drives all assertions about technique IDs and scores.
 """
-import json
 
 
 def test_navigator_layer_requires_auth(anon_client):
