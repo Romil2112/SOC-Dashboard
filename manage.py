@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Primary URL from env (defaults to local brew postgres via Unix socket).
-_PRIMARY_URL = os.environ.get(
+DATABASE_URL = os.environ.get(
     "DATABASE_URL", "postgresql://localhost/soc_dashboard"
 )
 
@@ -37,14 +37,14 @@ _DOCKER_CONTAINER = "soc-dashboard-web-1"
 def _create_in_local(username, pw_hash, role):
     """Write to local brew postgres via Unix socket."""
     try:
-        conn = psycopg2.connect(_PRIMARY_URL, connect_timeout=3)
+        conn = psycopg2.connect(DATABASE_URL, connect_timeout=3)
     except psycopg2.OperationalError as exc:
         return False, f"unreachable ({exc})"
     try:
         with conn, conn.cursor() as cur:
             cur.execute("SELECT 1 FROM users WHERE username = %s", (username,))
             if cur.fetchone():
-                return False, f"user '{username}' already exists"
+                return None, f"user '{username}' already exists"
             cur.execute(
                 "INSERT INTO users (username, password_hash, role) "
                 "VALUES (%s, %s, %s)",
@@ -83,16 +83,23 @@ def create_user(username, password, role):
     ).decode("ascii")
 
     any_ok = False
+    duplicate = False
 
     ok, msg = _create_in_local(username, pw_hash, role)
-    print(f"[{'ok' if ok else 'skip'}] local-db: {msg}")
-    any_ok = any_ok or ok
+    if ok is None:
+        duplicate = True
+        print(f"[skip] local-db: {msg}")
+    else:
+        print(f"[{'ok' if ok else 'skip'}] local-db: {msg}")
+        any_ok = any_ok or ok
 
     ok, msg = _create_in_docker(username, password, role)
     print(f"[{'ok' if ok else 'skip'}] docker-db: {msg}")
     any_ok = any_ok or ok
 
-    return 0 if any_ok else 2
+    if any_ok:
+        return 0
+    return 1 if duplicate else 2
 
 
 def main(argv=None):
